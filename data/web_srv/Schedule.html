@@ -1,0 +1,87 @@
+<html>
+<head>
+	<title>Motor Control</title>
+	<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body height="100%">
+	<div class="flat">
+		<div class="btn-group topbar">
+			<button type="button" onclick="window.location.href='Control.html'">Control</button> 
+			<button type="button" onclick="window.location.href='Schedule.html'">Schedule</button> 
+			<img class="top-logo" src="assets/logoText.svg">
+			<button type="button" onclick="window.location.href='Config.html'">Config</button> 
+			<button type="button" onclick="window.location.href='About.html'">About</button> 
+		</div>
+	</div>
+		<div class="wrap">
+			<div class="spaced display-panel vertical-padding">
+				<div class="center-text">
+					<b id ="commandDisplay">Please select a command</b>
+				</div>
+				<div class="even-spaced">
+					<button id="cr0" class="b2 no-radius" onclick="modeSelected(0)">Move</button>
+					<button id="cr1" class="b2 no-radius" onclick="modeSelected(1)">Goto</button>
+					<button id="cr2" class="b2 no-radius" onclick="modeSelected(2)">Stop</button>
+				</div>
+				<div class="center-text">
+					<b id ="motorDisplay">Please select a motor number</b>
+				</div>
+				<div class="motor-id-selection">
+					<select id="motorIdSelector" name="motorIdSelector">
+						<option value="1">1</option>
+						<option value="2">2</option>
+						<option value="3">3</option>
+						<option value="4">4</option>
+						<option value="5">5</option>
+						<option value="6">6</option>
+						<option value="7">7</option>
+						<option value="8">8</option>
+						<option value="9">9</option>
+						<option value="10">10</option>
+						<option value="11">11</option>
+						<option value="12">12</option>
+						<option value="13">13</option>
+						<option value="14">14</option>
+						<option value="15">15</option>
+					</select>
+				</div>
+
+				<div class="even-spaced">
+					<label class="margin">Degrees</label>
+					<input id="angleInput" value="0" type="input" style="width:100px;">
+				</div>
+				<div class="even-spaced">
+					<label class="margin">Degrees/Sec</label>
+					<input id="speedAngleInput" value="0" type="input" style="width:100px;">
+				</div>
+
+				<div class="even-spaced">
+					<label class="margin">Duration</label>
+					<input id="duration" value="0 Seconds" type="input" readonly="true" style="width:100px; background-color: #c3c3c3;">
+				</div>
+				<div class="center-text">
+					<input id="add" class="b2 no-radius" type="button" value="Add to Queue">
+				</div>
+			</div>
+			<div class="spaced table-panel">	
+				<button id="clear" class="left b2 no-radius" onclick="clearQueue()">Clear Queue</button>
+				<button id="execute" class="right b2 no-radius">Run Queue</button>
+				<table class="table-normal">
+					<thead>
+						<tr>
+							<td>Motor</td>
+							<td>Command</td>
+							<td>Code Amount</td>
+							<td>At Speed</td>
+						</tr>
+					</thead>
+					<tbody id="body">
+					</tbody>
+				</table>
+			</div>
+		</div>
+	</div>
+</body>
+<script src="./schedule.js"></script>
+</html>
