@@ -95,17 +95,27 @@ esp_err_t WifiController::init() {
 }
 
 esp_err_t WifiController::changeApSsidPass(const String* newSsid, const String* newPass) {
-    esp_err_t err =  esp_wifi_set_mode(WIFI_MODE_AP);
-    
+    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_AP);
+
     wifi_config_t configAp;
     err = esp_wifi_get_config(WIFI_IF_AP, &configAp);
-    if (err) return err;
+    if (err)
+        return err;
 
-    strlcpy(reinterpret_cast<char*>(configAp.ap.ssid), newSsid->c_str(), sizeof(configAp.ap.ssid));
+    strlcpy(reinterpret_cast<char *>(configAp.ap.ssid), newSsid->c_str(), sizeof(configAp.ap.ssid));
     configAp.ap.ssid_len = strlen(reinterpret_cast<char *>(configAp.ap.ssid));
-    strcpy(reinterpret_cast<char*>(configAp.ap.password), newPass->c_str());
-    configAp.ap.authmode = WIFI_AUTH_WPA2_PSK;
-    
+
+    if (!newPass || strlen(newPass->c_str()) == 0)
+    {
+        configAp.ap.authmode = WIFI_AUTH_OPEN;
+        *configAp.ap.password = 0;
+    }
+    else
+    {
+        configAp.ap.authmode = WIFI_AUTH_WPA2_PSK;
+        strlcpy(reinterpret_cast<char *>(configAp.ap.password), newPass->c_str(), sizeof(configAp.ap.password));
+    }
+
     log_i("SSID is %s", configAp.ap.ssid);
     log_i("PASS is %s", configAp.ap.password);
 
