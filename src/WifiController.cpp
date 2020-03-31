@@ -57,7 +57,7 @@ esp_err_t WifiController::init() {
     esp_wifi_set_storage(WIFI_STORAGE_FLASH);
 
     preferences.begin("myr", false);
-    preferences.clear();
+    
     if (preferences.getUChar("WiFi Init", 0) == 0) {
         log_i("First launch detected");
         
@@ -86,6 +86,9 @@ esp_err_t WifiController::init() {
         }          
         preferences.putUChar("WiFi Init", 1);
     } 
+
+    retries = MYR_WIFI_STA_RETRIES;
+    
     err = esp_wifi_start();
     if (err) return err;
     
