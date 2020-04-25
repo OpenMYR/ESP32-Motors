@@ -1,3 +1,9 @@
+#if __has_include("config/LocalConfig.h")
+#include "config/LocalConfig.h"
+#else
+#include "config/DefaultConfig.h"
+#endif
+
 #include "CommandParser.h"
 #include "OpBuffer.h"
 #include "Op.h"
@@ -144,11 +150,11 @@ void CommandParser::parseConfig(JsonObject *cmd, char code)
     String pass = dataArray[1];
 
     if(code == 'C') {
-        WifiController::changeToSTA();
-        WifiController::changeStaSsidPass(&ssid, &pass);
+        WifiController::setStaCredentials(&ssid, &pass, true);
+        WifiController::changeMode(MYR_WIFI_MODE_STATION, true);
     }
-    else if(code == 'D') WifiController::changeToAP();
-    else if(code == 'O') WifiController::changeStaSsidPass(&ssid, &pass);
+    else if(code == 'D') WifiController::changeMode(MYR_WIFI_MODE_AP, true);
+    else if(code == 'O') WifiController::setStaCredentials(&ssid, &pass, true);
     else log_i("Unknown command %c", code);
 }
 

@@ -29,6 +29,11 @@ static xQueueHandle _network_event_queue;
 static TaskHandle_t _network_event_task_handle = NULL;
 static EventGroupHandle_t _network_event_group = NULL;
 
+static String apSsid;
+static String apPass;
+static String staSsid;
+static String staPass;
+
 IPAddress localIP(192,168,4,1);
 IPAddress gateway(192,168,4,1);
 IPAddress subnet(255,255,255,0);
@@ -55,129 +60,151 @@ esp_err_t WifiController::init() {
     if (err) return err;
 
     esp_wifi_set_storage(WIFI_STORAGE_FLASH);
+    generateSsid();
 
     preferences.begin("myr", false);
-    
-    if (preferences.getUChar("WiFi Init", 0) == 0) {
-        log_i("First launch detected");
-        
-        generateSsid();
-        err =  esp_wifi_set_mode(WIFI_MODE_APSTA);
-        if (err) return err;
-        err = changeApSsidPass(&ssid, &MYR_WIFI_DEFAULT_AP_PASS);
-        if (err) return err;
-        err = changeStaSsidPass(&MYR_WIFI_DEFAULT_STATION_SSID, &MYR_WIFI_DEFAULT_STATION_PASS);
-        if (err) return err;
-
-        switch (MYR_WIFI_START_IN_MODE) {
-            case MYR_WIFI_MODE_AP:
-                changeToAP();
-                break;
-            case MYR_WIFI_MODE_STATION: 
-                changeToSTA();
-                break;
-            case MYR_WIFI_MODE_AP_STATION:
-                log_i("starting as ap/sta");
-                //todo: implement ap/sta mode
-                log_e("ap/station mode unimplemented");
-                err = ESP_ERR_NOT_SUPPORTED;
-                if (err) return err;
-                break;
-        }          
-        preferences.putUChar("WiFi Init", 1);
-    } 
-
-    retries = MYR_WIFI_STA_RETRIES;
-    
-    err = esp_wifi_start();
-    if (err) return err;
-    
+    uint8_t isFirstInit = preferences.getUChar("WiFi Init", 0) == 0;
     preferences.end();
     
-    return ERR_OK;
-}
-
-esp_err_t WifiController::changeApSsidPass(const String* newSsid, const String* newPass) {
-    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_AP);
-
-    wifi_config_t configAp;
-    err = esp_wifi_get_config(WIFI_IF_AP, &configAp);
-    if (err)
-        return err;
-
-    strlcpy(reinterpret_cast<char *>(configAp.ap.ssid), newSsid->c_str(), sizeof(configAp.ap.ssid));
-    configAp.ap.ssid_len = strlen(reinterpret_cast<char *>(configAp.ap.ssid));
-
-    if (!newPass || strlen(newPass->c_str()) == 0)
-    {
-        configAp.ap.authmode = WIFI_AUTH_OPEN;
-        *configAp.ap.password = 0;
-    }
-    else
-    {
-        configAp.ap.authmode = WIFI_AUTH_WPA2_PSK;
-        strlcpy(reinterpret_cast<char *>(configAp.ap.password), newPass->c_str(), sizeof(configAp.ap.password));
-    }
-
-    log_i("SSID is %s", configAp.ap.ssid);
-    log_i("PASS is %s", configAp.ap.password);
-
-    return esp_wifi_set_config(WIFI_IF_AP, &configAp);
-}
-
-esp_err_t WifiController::changeStaSsidPass(const String* newSsid, const String* newPass) {
-    wifi_mode_t cm;
-    esp_wifi_get_mode(&cm);
-    esp_err_t err;
-
-    if (cm != WIFI_MODE_STA) {
-        err = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (isFirstInit) {
+        log_i("First launch detected");
+        
+        saveValue("WiFi mode", MYR_WIFI_START_IN_MODE);
+        
         if (err) return err;
+        err = setApCredentials(&ssid, &MYR_WIFI_DEFAULT_AP_PASS, true);
+        if (err) return err;
+        err = setStaCredentials(&MYR_WIFI_DEFAULT_STATION_SSID, &MYR_WIFI_DEFAULT_STATION_PASS, true);
+        if (err) return err;
+
+        saveValue("WiFi Init", 1);
     }
-    
-    wifi_config_t configSta;
-    err = esp_wifi_get_config(WIFI_IF_STA, &configSta);
+
+    err = esp_wifi_start();
     if (err) return err;
 
-    strcpy(reinterpret_cast<char*>(configSta.sta.ssid), newSsid->c_str());
-    strcpy(reinterpret_cast<char*>(configSta.sta.password), newPass->c_str());
+    preferences.begin("myr", true);
+    uint8_t targetMode = preferences.getUChar("WiFi Mode", MYR_WIFI_START_IN_MODE);
+    staSsid = preferences.getString("WiFi StaSsid", MYR_WIFI_DEFAULT_STATION_SSID);
+    staPass = preferences.getString("WiFi StaPass", MYR_WIFI_DEFAULT_STATION_PASS);
+    apSsid = preferences.getString("WiFi ApSsid", MYR_WIFI_DEFAULT_AP_SSID);
+    apPass = preferences.getString("WiFi ApPass", MYR_WIFI_DEFAULT_AP_PASS);
+    preferences.end();
 
-    log_i("SSID is %s", configSta.sta.ssid);
+    err = changeMode(targetMode, false);
     
-    return esp_wifi_set_config(WIFI_IF_STA, &configSta);
+    return err;
 }
 
-void WifiController::changeToAP() {
-    esp_err_t err;
-    log_i("Entering AP mode");
-    if (state == MYR_WIFI_STATE_STA) {
-        err = esp_wifi_disconnect();
-        if (err) log_i("Error: %s, #%u", esp_err_to_name(err), err);
+esp_err_t WifiController::setApCredentials(const String* newSsid, const String* newPass, bool save) { 
+    esp_err_t err = ERR_OK;
+    apSsid = *newSsid;
+    apPass = *newPass; 
+
+    if (save) {
+        err = saveValue("WiFi ApSsid", newSsid);
+        if (err != ERR_OK) return err;
+        err = saveValue("WiFi ApPass", newPass);
     }
-    err = esp_wifi_set_mode(WIFI_MODE_AP);
-    if (err) log_i("Error: %s, #%u", esp_err_to_name(err), err);
-    state = MYR_WIFI_STATE_AP;
-    // esp_wifi_start();
+
+    return err;
 }
 
-void WifiController::changeToSTA() {
-    esp_err_t err;
-    retries = MYR_WIFI_STA_RETRIES;
-    log_i("Entering Station mode");
-    if (state == MYR_WIFI_STATE_STA) {
-        err = esp_wifi_disconnect();
-        esp_wifi_connect();
-        if (err) log_i("Error: %s, #%u", esp_err_to_name(err), err);
-    } else {  
-        err = esp_wifi_set_mode(WIFI_MODE_STA);
-        if (err) log_i("Error: %s, #%u", esp_err_to_name(err), err);
+esp_err_t WifiController::setStaCredentials(const String* newSsid, const String* newPass, bool save) {
+    log_i("ssid: %s", newSsid);
+    esp_err_t err = ERR_OK;
+    staSsid = *newSsid;
+    staPass = *newPass; 
+
+    if (save) {
+        err = saveValue("WiFi StaSsid", newSsid);
+        if (err != ERR_OK) return err;
+        err = saveValue("WiFi StaPass", newPass);
     }
-    state = MYR_WIFI_STATE_STA_CONNECTING;
-    // err = esp_wifi_start();
+
+    return err;
+}
+
+esp_err_t WifiController::changeMode(uint8_t mode, bool save) {
+    esp_err_t err;
+    switch (mode)
+    {
+        case MYR_WIFI_MODE_AP:
+        {
+            log_i("Entering AP mode");
+
+            if (state == MYR_WIFI_STATE_STA) {
+                err = esp_wifi_disconnect();
+                ESP_ERROR_CHECK(err);
+            }
+            err = esp_wifi_set_mode(WIFI_MODE_AP);
+            ESP_ERROR_CHECK(err);
+            
+            wifi_config_t configSta;
+            err = esp_wifi_get_config(WIFI_IF_AP, &configSta);
+            ESP_ERROR_CHECK(err);
+
+            strcpy(reinterpret_cast<char*>(configSta.ap.ssid), apSsid.c_str());
+            strcpy(reinterpret_cast<char*>(configSta.ap.password), apPass.c_str());
+            err = esp_wifi_set_config(WIFI_IF_AP, &configSta);
+            ESP_ERROR_CHECK(err);
+            
+            state = MYR_WIFI_STATE_AP;
+
+            break;
+        }
+        case MYR_WIFI_MODE_STATION:
+        {
+            log_i("Entering Station mode");
+
+            retries = MYR_WIFI_STA_RETRIES;
+            if (state == MYR_WIFI_STATE_STA) {
+                err = esp_wifi_disconnect();
+                esp_wifi_connect();
+                ESP_ERROR_CHECK(err);
+            } else {  
+                err = esp_wifi_set_mode(WIFI_MODE_STA);
+                ESP_ERROR_CHECK(err);
+            }
+
+            wifi_config_t configSta;
+            err = esp_wifi_get_config(WIFI_IF_STA, &configSta);
+            ESP_ERROR_CHECK(err);
+
+            strcpy(reinterpret_cast<char*>(configSta.sta.ssid), staSsid.c_str());
+            strcpy(reinterpret_cast<char*>(configSta.sta.password), staPass.c_str());
+            err = esp_wifi_set_config(WIFI_IF_STA, &configSta);
+
+            log_i("ssid is %s", staSsid);
+
+            state = MYR_WIFI_STATE_STA_CONNECTING;
+
+            break;   
+        } 
+        default:
+            return ESP_ERR_NOT_SUPPORTED;
+    }
+    if (save) saveValue("Wifi Mode", MYR_WIFI_STATE_AP);
+
+    return ERR_OK;
 }
 
 void WifiController::changeOTAPass(const String* oldPass, const String* pass) {
     log_i("Changing OTA pass");
+}
+
+esp_err_t WifiController::saveValue(String id, const String* value) {
+    if (!preferences.begin("myr", false)) return ERR_ALREADY;
+    preferences.putString(id.c_str(), *value);
+    preferences.end();
+    return ERR_OK;
+}
+esp_err_t WifiController::saveValue(String id, const uint8_t value) {
+    if (!preferences.begin("myr", false)) return ERR_ALREADY;
+    preferences.begin("myr", false);
+    preferences.putUChar(id.c_str(), value);
+    preferences.end();
+    return ERR_OK;
 }
 
 void WifiController::generateSsid() {
@@ -307,8 +334,9 @@ void WifiController::event_handler(void *arg, system_event_t *event)
             } else {
                 log_i("Failed to connect, starting fallback AP");
                 state = MYR_WIFI_STATE_STA_FAIL;
-                changeToAP();
+                changeMode(MYR_WIFI_MODE_AP, false);
             }
+
             break;
         }
         case SYSTEM_EVENT_STA_AUTHMODE_CHANGE:

@@ -32,6 +32,8 @@ const String MYR_WIFI_DEFAULT_AP_PASS = "";
 const String MYR_WIFI_DEFAULT_STATION_SSID = "ssid";    //Do not define these in DefaultConfig.h, see warning above
 const String MYR_WIFI_DEFAULT_STATION_PASS = "pass";
 
+#define MYR_WIFI_STATION_FAIL_TO_AP 1;  //If the device fails to connect, should it establish an AP
+
 #define MYR_WIFI_STA_RETRIES 5;
 
 #endif
