@@ -19,7 +19,7 @@
 const char * wifi_err_reason_str[] = { "UNSPECIFIED", "AUTH_EXPIRE", "AUTH_LEAVE", "ASSOC_EXPIRE", "ASSOC_TOOMANY", "NOT_AUTHED", "NOT_ASSOCED", "ASSOC_LEAVE", "ASSOC_NOT_AUTHED", "DISASSOC_PWRCAP_BAD", "DISASSOC_SUPCHAN_BAD", "UNSPECIFIED", "IE_INVALID", "MIC_FAILURE", "4WAY_HANDSHAKE_TIMEOUT", "GROUP_KEY_UPDATE_TIMEOUT", "IE_IN_4WAY_DIFFERS", "GROUP_CIPHER_INVALID", "PAIRWISE_CIPHER_INVALID", "AKMP_INVALID", "UNSUPP_RSN_IE_VERSION", "INVALID_RSN_IE_CAP", "802_1X_AUTH_FAILED", "CIPHER_SUITE_REJECTED", "BEACON_TIMEOUT", "NO_AP_FOUND", "AUTH_FAIL", "ASSOC_FAIL", "HANDSHAKE_TIMEOUT", "CONNECTION_FAIL" };
 #define wifi_err_reason_to_str(reason) ((reason>=200)?wifi_err_reason_str[reason-176]:wifi_err_reason_str[reason-1])
 
-static String ssid = "";
+static String myrSsid = "";
 static int retries;
 
 static uint8_t state = MYR_WIFI_STATE_INIT;
@@ -72,7 +72,7 @@ esp_err_t WifiController::init() {
         saveValue("WiFi mode", MYR_WIFI_START_IN_MODE);
         
         if (err) return err;
-        err = setApCredentials(&ssid, &MYR_WIFI_DEFAULT_AP_PASS, true);
+        err = setApCredentials(&myrSsid, &MYR_WIFI_DEFAULT_AP_PASS, true);
         if (err) return err;
         err = setStaCredentials(&MYR_WIFI_DEFAULT_STATION_SSID, &MYR_WIFI_DEFAULT_STATION_PASS, true);
         if (err) return err;
@@ -87,7 +87,7 @@ esp_err_t WifiController::init() {
     uint8_t targetMode = preferences.getUChar("WiFi Mode", MYR_WIFI_START_IN_MODE);
     staSsid = preferences.getString("WiFi StaSsid", MYR_WIFI_DEFAULT_STATION_SSID);
     staPass = preferences.getString("WiFi StaPass", MYR_WIFI_DEFAULT_STATION_PASS);
-    apSsid = preferences.getString("WiFi ApSsid", MYR_WIFI_DEFAULT_AP_SSID);
+    apSsid = preferences.getString("WiFi ApSsid", myrSsid);
     apPass = preferences.getString("WiFi ApPass", MYR_WIFI_DEFAULT_AP_PASS);
     preferences.end();
 
@@ -140,13 +140,21 @@ esp_err_t WifiController::changeMode(uint8_t mode, bool save) {
             err = esp_wifi_set_mode(WIFI_MODE_AP);
             ESP_ERROR_CHECK(err);
             
-            wifi_config_t configSta;
-            err = esp_wifi_get_config(WIFI_IF_AP, &configSta);
+            wifi_config_t configAp;
+            err = esp_wifi_get_config(WIFI_IF_AP, &configAp);
             ESP_ERROR_CHECK(err);
 
-            strcpy(reinterpret_cast<char*>(configSta.ap.ssid), apSsid.c_str());
-            strcpy(reinterpret_cast<char*>(configSta.ap.password), apPass.c_str());
-            err = esp_wifi_set_config(WIFI_IF_AP, &configSta);
+            strlcpy(reinterpret_cast<char *>(configAp.ap.ssid), apSsid.c_str(), sizeof(configAp.ap.ssid));
+            configAp.ap.ssid_len = strlen(reinterpret_cast<char *>(configAp.ap.ssid));
+
+            if (!apPass || strlen(apPass.c_str()) == 0) {
+                    configAp.ap.authmode = WIFI_AUTH_OPEN;
+                    *configAp.ap.password = 0;
+            } else {
+                configAp.ap.authmode = WIFI_AUTH_WPA2_PSK;
+                strlcpy(reinterpret_cast<char *>(configAp.ap.password), apPass.c_str(), sizeof(configAp.ap.password));
+            }
+            err = esp_wifi_set_config(WIFI_IF_AP, &configAp);
             ESP_ERROR_CHECK(err);
             
             state = MYR_WIFI_STATE_AP;
@@ -184,7 +192,7 @@ esp_err_t WifiController::changeMode(uint8_t mode, bool save) {
         default:
             return ESP_ERR_NOT_SUPPORTED;
     }
-    if (save) saveValue("Wifi Mode", MYR_WIFI_STATE_AP);
+    if (save) saveValue("Wifi Mode", state);
 
     return ERR_OK;
 }
@@ -208,7 +216,7 @@ esp_err_t WifiController::saveValue(String id, const uint8_t value) {
 }
 
 void WifiController::generateSsid() {
-    ssid = MYR_WIFI_DEFAULT_AP_SSID;
+    myrSsid = MYR_WIFI_DEFAULT_AP_SSID;
     if (MYR_WIFI_DEFAULT_AP_SSID_UID_CHAR_COUNT == 0) return;
     MD5Builder md5;
     md5.begin();
@@ -217,7 +225,7 @@ void WifiController::generateSsid() {
 
     String md5_out = md5.toString().substring(32 - MYR_WIFI_DEFAULT_AP_SSID_UID_CHAR_COUNT);
     md5_out.toUpperCase();
-    ssid += md5_out;
+    myrSsid += md5_out;
 }
 
 esp_err_t WifiController::startTCP() {
