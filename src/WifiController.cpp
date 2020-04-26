@@ -15,6 +15,12 @@
 #include <esp_event_loop.h>
 
 #define TAG "WifiController"
+#define MYR_WIFI_PREF_TAG_INIT "WiFi Init"
+#define MYR_WIFI_PREF_TAG_MODE "WiFi Mode"
+#define MYR_WIFI_PREF_TAG_STA_SSID "WiFi StaSsid"
+#define MYR_WIFI_PREF_TAG_STA_PASS "WiFi StaPass"
+#define MYR_WIFI_PREF_TAG_AP_SSID "WiFi ApSsid"
+#define MYR_WIFI_PREF_TAG_AP_PASS "WiFi ApPass"
 
 const char * wifi_err_reason_str[] = { "UNSPECIFIED", "AUTH_EXPIRE", "AUTH_LEAVE", "ASSOC_EXPIRE", "ASSOC_TOOMANY", "NOT_AUTHED", "NOT_ASSOCED", "ASSOC_LEAVE", "ASSOC_NOT_AUTHED", "DISASSOC_PWRCAP_BAD", "DISASSOC_SUPCHAN_BAD", "UNSPECIFIED", "IE_INVALID", "MIC_FAILURE", "4WAY_HANDSHAKE_TIMEOUT", "GROUP_KEY_UPDATE_TIMEOUT", "IE_IN_4WAY_DIFFERS", "GROUP_CIPHER_INVALID", "PAIRWISE_CIPHER_INVALID", "AKMP_INVALID", "UNSUPP_RSN_IE_VERSION", "INVALID_RSN_IE_CAP", "802_1X_AUTH_FAILED", "CIPHER_SUITE_REJECTED", "BEACON_TIMEOUT", "NO_AP_FOUND", "AUTH_FAIL", "ASSOC_FAIL", "HANDSHAKE_TIMEOUT", "CONNECTION_FAIL" };
 #define wifi_err_reason_to_str(reason) ((reason>=200)?wifi_err_reason_str[reason-176]:wifi_err_reason_str[reason-1])
@@ -63,13 +69,13 @@ esp_err_t WifiController::init() {
     generateSsid();
 
     preferences.begin("myr", false);
-    uint8_t isFirstInit = preferences.getUChar("WiFi Init", 0) == 0;
+    uint8_t isFirstInit = preferences.getUChar(MYR_WIFI_PREF_TAG_INIT, 0) == 0;
     preferences.end();
     
     if (isFirstInit) {
         log_i("First launch detected");
         
-        saveValue("WiFi mode", MYR_WIFI_START_IN_MODE);
+        saveValue(MYR_WIFI_PREF_TAG_MODE, MYR_WIFI_START_IN_MODE);
         
         if (err) return err;
         err = setApCredentials(&myrSsid, &MYR_WIFI_DEFAULT_AP_PASS, true);
@@ -77,18 +83,18 @@ esp_err_t WifiController::init() {
         err = setStaCredentials(&MYR_WIFI_DEFAULT_STATION_SSID, &MYR_WIFI_DEFAULT_STATION_PASS, true);
         if (err) return err;
 
-        saveValue("WiFi Init", 1);
+        saveValue(MYR_WIFI_PREF_TAG_INIT, 1);
     }
 
     err = esp_wifi_start();
     if (err) return err;
 
     preferences.begin("myr", true);
-    uint8_t targetMode = preferences.getUChar("WiFi Mode", MYR_WIFI_START_IN_MODE);
-    staSsid = preferences.getString("WiFi StaSsid", MYR_WIFI_DEFAULT_STATION_SSID);
-    staPass = preferences.getString("WiFi StaPass", MYR_WIFI_DEFAULT_STATION_PASS);
-    apSsid = preferences.getString("WiFi ApSsid", myrSsid);
-    apPass = preferences.getString("WiFi ApPass", MYR_WIFI_DEFAULT_AP_PASS);
+    uint8_t targetMode = preferences.getUChar(MYR_WIFI_PREF_TAG_MODE, MYR_WIFI_START_IN_MODE);
+    staSsid = preferences.getString(MYR_WIFI_PREF_TAG_STA_SSID, MYR_WIFI_DEFAULT_STATION_SSID);
+    staPass = preferences.getString(MYR_WIFI_PREF_TAG_STA_PASS, MYR_WIFI_DEFAULT_STATION_PASS);
+    apSsid = preferences.getString(MYR_WIFI_PREF_TAG_AP_SSID, myrSsid);
+    apPass = preferences.getString(MYR_WIFI_PREF_TAG_AP_PASS, MYR_WIFI_DEFAULT_AP_PASS);
     preferences.end();
 
     err = changeMode(targetMode, false);
@@ -102,9 +108,9 @@ esp_err_t WifiController::setApCredentials(const String* newSsid, const String* 
     apPass = *newPass; 
 
     if (save) {
-        err = saveValue("WiFi ApSsid", newSsid);
+        err = saveValue(MYR_WIFI_PREF_TAG_AP_SSID, newSsid);
         if (err != ERR_OK) return err;
-        err = saveValue("WiFi ApPass", newPass);
+        err = saveValue(MYR_WIFI_PREF_TAG_AP_PASS, newPass);
     }
 
     return err;
@@ -117,9 +123,9 @@ esp_err_t WifiController::setStaCredentials(const String* newSsid, const String*
     staPass = *newPass; 
 
     if (save) {
-        err = saveValue("WiFi StaSsid", newSsid);
+        err = saveValue(MYR_WIFI_PREF_TAG_STA_SSID, newSsid);
         if (err != ERR_OK) return err;
-        err = saveValue("WiFi StaPass", newPass);
+        err = saveValue(MYR_WIFI_PREF_TAG_STA_PASS, newPass);
     }
 
     return err;
@@ -158,6 +164,7 @@ esp_err_t WifiController::changeMode(uint8_t mode, bool save) {
             ESP_ERROR_CHECK(err);
             
             state = MYR_WIFI_STATE_AP;
+            if (save) saveValue(MYR_WIFI_PREF_TAG_MODE, MYR_WIFI_MODE_AP);
 
             break;
         }
@@ -186,13 +193,13 @@ esp_err_t WifiController::changeMode(uint8_t mode, bool save) {
             log_i("ssid is %s", staSsid);
 
             state = MYR_WIFI_STATE_STA_CONNECTING;
+            if (save) saveValue(MYR_WIFI_PREF_TAG_MODE, MYR_WIFI_MODE_STATION);
 
             break;   
         } 
         default:
             return ESP_ERR_NOT_SUPPORTED;
     }
-    if (save) saveValue("Wifi Mode", state);
 
     return ERR_OK;
 }
