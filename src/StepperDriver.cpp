@@ -45,15 +45,18 @@ static uint8_t peekRate = 5;
 #define PCNT_THRESH1_VAL 1
 #define PCNT_THRESH0_VAL -1
 
-bool positiveDirection = true;
+bool const positiveDirection = true;     
+bool DRAM_ATTR const endstopTrippedState = false;  // Value of endstop when it is engaged.
 uint32_t direction = 0;
-uint32_t paused = 0;
-uint32_t command_done = 1;
-uint32_t endstop_a = 0;
-uint32_t endstop_b = 0;
+uint32_t DRAM_ATTR paused = 0;
+uint32_t DRAM_ATTR command_done = 1;
+uint32_t DRAM_ATTR endstop_a_Active = 0;
+uint32_t DRAM_ATTR endstop_b_Active = 0;
+uint32_t DRAM_ATTR endstop_a_Status = 0;
+uint32_t DRAM_ATTR endstop_b_Status = 0;
 uint16_t stepsPerRev = 200;
 uint16_t mircoSteps = 1;
-int32_t location = 0;
+int32_t DRAM_ATTR location = 0;
 ESP32PWM pwm;
 pcnt_isr_handle_t user_isr_handle = NULL; //user's ISR service handle
 
@@ -83,8 +86,14 @@ StepperDriver *IRAM_ATTR StepperDriver::getInstance()
 void StepperDriver::initMotorGpio()
 {
     motorsControlled = 1;
+    pinMode(GPIO_IO_A, INPUT_PULLUP);
+    pinMode(GPIO_IO_B, INPUT_PULLUP);
     attachInterrupt(GPIO_IO_A, endstop_a_interrupt, CHANGE);
     attachInterrupt(GPIO_IO_B, endstop_b_interrupt, CHANGE);
+    pinMode(GPIO_STEP_DIR, OUTPUT);
+    digitalWrite(GPIO_STEP_DIR, direction);
+    pinMode(GPIO_STEP, OUTPUT);
+    digitalWrite(GPIO_STEP, LOW);
     pinMode(GPIO_STEP_ENABLE, OUTPUT);
     digitalWrite(GPIO_STEP_ENABLE, LOW);
     pinMode(GPIO_USTEP_MS1, OUTPUT);
@@ -104,8 +113,14 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
         return;
     motorID--; //motors are 1-15, we want 0-14
 
-    if (endstop_a || endstop_b)
+    if (endstop_a_Active || endstop_b_Active)
+    {
+        endstop_a_Status &= ~((0) << MyrEndstopFlagStateRead);
+        endstop_a_Status |= (0) << MyrEndstopFlagStateRead;
+        endstop_b_Status &= ~((0) << MyrEndstopFlagStateRead);
+        endstop_b_Status |= (0) << MyrEndstopFlagStateRead;
         return;
+    }
 
     uint32_t limit = 0;
 
@@ -147,8 +162,14 @@ void StepperDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorI
         return;
     motorID--;
 
-    if (endstop_a || endstop_b)
+    if (endstop_a_Active || endstop_b_Active)
+    {
+        endstop_a_Status &= ~((0) << MyrEndstopFlagStateRead);
+        endstop_a_Status |= (0) << MyrEndstopFlagStateRead;
+        endstop_b_Status &= ~((0) << MyrEndstopFlagStateRead);
+        endstop_b_Status |= (0) << MyrEndstopFlagStateRead;
         return;
+    }
 
     uint32_t limit = abs(targetAngle);
     direction = targetAngle > 0 ? positiveDirection : !positiveDirection;
@@ -182,8 +203,14 @@ void StepperDriver::motorStop(signed int wait_time, unsigned short precision, ui
         return;
     motorID--;
 
-    if (endstop_a || endstop_b)
+    if (endstop_a_Active || endstop_b_Active)
+    {
+        endstop_a_Status &= ~((0) << MyrEndstopFlagStateRead);
+        endstop_a_Status |= (0) << MyrEndstopFlagStateRead;
+        endstop_b_Status &= ~((0) << MyrEndstopFlagStateRead);
+        endstop_b_Status |= (0) << MyrEndstopFlagStateRead;
         return;
+    }
 
     motorDwell = true;
     startTime[0] = esp_timer_get_time();
@@ -221,31 +248,50 @@ void StepperDriver::isrStartIoDriver()
 
 void IRAM_ATTR StepperDriver::endstop_a_interrupt()
 {
-    //stopWaveform();
-    if (digitalRead(GPIO_IO_A) == 0)
+    bool stateNow = digitalRead(GPIO_IO_A);
+    
+    if(endstop_a_Status & MyrEndstopMaskStateRead)
     {
-        endstop_a = 1;
+        endstop_a_Status &= ~MyrEndstopMaskCounter;
     }
-    else
+
+    if((endstop_a_Status & MyrEndstopMaskCounter) < MyrEndstopMaskCounter)
     {
-        endstop_a = 0;
-        command_done = 1;
-        setStepRate(0);
+        endstop_a_Status++;
     }
+
+    endstop_a_Status &= ~(MyrEndstopFlagStatePrevious);
+    endstop_a_Status |= (endstop_a_Status & MyrEndstopMaskStateNow) << 1; // MyrEndstopFlagStatePrevious is one bit to the left from MyrEndstopFlagStateNow
+    endstop_a_Status &= ~(MyrEndstopFlagStateNow);
+    endstop_a_Status |= (stateNow) << MyrEndstopFlagStateNow;
+    endstop_a_Status |= 0x1 << MyrEndstopFlagStateChanged;
+
+    endstop_a_Active = stateNow == endstopTrippedState ? true : false;
+
 }
 
 void IRAM_ATTR StepperDriver::endstop_b_interrupt()
 {
-    if (digitalRead(GPIO_IO_B) == 0)
+    bool stateNow = digitalRead(GPIO_IO_B);
+    
+    if(endstop_b_Status & MyrEndstopMaskStateRead)
     {
-        endstop_b = 1;
+        endstop_b_Status &= ~MyrEndstopMaskCounter;
     }
-    else
+
+    if((endstop_b_Status & MyrEndstopMaskCounter) < MyrEndstopMaskCounter)
     {
-        endstop_b = 0;
-        command_done = 1;
-        setStepRate(0);
+        endstop_b_Status++;
     }
+
+    endstop_b_Status &= ~(MyrEndstopFlagStatePrevious);
+    endstop_b_Status |= (endstop_b_Status & MyrEndstopMaskStateNow) << 1; // MyrEndstopFlagStatePrevious is one bit to the left from MyrEndstopFlagStateNow
+    endstop_b_Status &= ~(MyrEndstopFlagStateNow);
+    endstop_b_Status |= (stateNow) << MyrEndstopFlagStateNow;
+    endstop_b_Status |= 0x1 << MyrEndstopFlagStateChanged;
+
+    endstop_b_Active = stateNow == endstopTrippedState ? true : false;
+    
 }
 
 void StepperDriver::isrStopIoDriver()
@@ -255,10 +301,6 @@ void StepperDriver::isrStopIoDriver()
 
 void StepperDriver::isrIoStep(void *pvParameters)
 {
-    pinMode(GPIO_STEP_DIR, OUTPUT);
-    digitalWrite(GPIO_STEP_DIR, direction);
-    pinMode(GPIO_STEP, OUTPUT);
-    digitalWrite(GPIO_STEP, LOW);
     pcnt_setup_init(GPIO_STEP);
     StepperDriver::getInstance()->driver();
 }
@@ -270,6 +312,14 @@ void StepperDriver::checkLocation()
     {
         setStepRate(0);
         commandDone[0] = true;
+    } else if(endstop_a_Active || endstop_b_Active)
+    {
+        setStepRate(0);
+        commandDone[0] = true;
+        endstop_a_Status &= ~((0) << MyrEndstopFlagStateRead);
+        endstop_a_Status |= (0) << MyrEndstopFlagStateRead;
+        endstop_b_Status &= ~((0) << MyrEndstopFlagStateRead);
+        endstop_b_Status |= (0) << MyrEndstopFlagStateRead;
     }
 }
 
