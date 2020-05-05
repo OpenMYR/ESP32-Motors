@@ -36,6 +36,8 @@ private:
     TaskHandle_t motorTaskHandle;
     static void IRAM_ATTR endstop_a_interrupt();
     static void IRAM_ATTR endstop_b_interrupt();
+    static void IRAM_ATTR endstopIsrUpdateFlags(uint32_t &flags, uint8_t pin);
+    static bool isEndstopTripped(uint32_t &flags, uint8_t pin);
     static void setStepRate(int32_t rate);
     static void addSteps(uint32_t steps);
     static void addSteps(uint32_t steps, uint16_t microstepRate);
@@ -76,10 +78,12 @@ private:
     uint32_t static const MyrEndstopMaskStatePrevious     = 0x0200;
     uint32_t static const MyrEndstopMaskStateChanged      = 0x0400;
     uint32_t static const MyrEndstopMaskStateRead         = 0x0800;
+    uint32_t static const MyrEndstopMaskTripped           = 0x1000;
     uint8_t  static const MyrEndstopFlagStateNow          =  8;
     uint8_t  static const MyrEndstopFlagStatePrevious     =  9;
     uint8_t  static const MyrEndstopFlagStateChanged      = 10;
     uint8_t  static const MyrEndstopFlagStateRead         = 11;
+    uint8_t  static const MyrEndstopFlagTripped           = 12;
 
 };
 

@@ -45,13 +45,11 @@ static uint8_t peekRate = 5;
 #define PCNT_THRESH1_VAL 1
 #define PCNT_THRESH0_VAL -1
 
-bool const positiveDirection = true;     
-bool DRAM_ATTR const endstopTrippedState = false;  // Value of endstop when it is engaged.
+bool const positiveDirection = true;
+bool DRAM_ATTR const isEndstopTrippedHigh = false; // Value of endstop when it is engaged.
 uint32_t direction = 0;
 uint32_t DRAM_ATTR paused = 0;
 uint32_t DRAM_ATTR command_done = 1;
-uint32_t DRAM_ATTR endstop_a_Active = 0;
-uint32_t DRAM_ATTR endstop_b_Active = 0;
 uint32_t DRAM_ATTR endstop_a_Status = 0;
 uint32_t DRAM_ATTR endstop_b_Status = 0;
 uint16_t stepsPerRev = 200;
@@ -113,12 +111,8 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
         return;
     motorID--; //motors are 1-15, we want 0-14
 
-    if (endstop_a_Active || endstop_b_Active)
+    if (isEndstopTripped(endstop_a_Status, GPIO_IO_A) || isEndstopTripped(endstop_b_Status, GPIO_IO_B))
     {
-        endstop_a_Status &= ~((0) << MyrEndstopFlagStateRead);
-        endstop_a_Status |= (0) << MyrEndstopFlagStateRead;
-        endstop_b_Status &= ~((0) << MyrEndstopFlagStateRead);
-        endstop_b_Status |= (0) << MyrEndstopFlagStateRead;
         return;
     }
 
@@ -162,12 +156,8 @@ void StepperDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorI
         return;
     motorID--;
 
-    if (endstop_a_Active || endstop_b_Active)
+    if (isEndstopTripped(endstop_a_Status, GPIO_IO_A) || isEndstopTripped(endstop_b_Status, GPIO_IO_B))
     {
-        endstop_a_Status &= ~((0) << MyrEndstopFlagStateRead);
-        endstop_a_Status |= (0) << MyrEndstopFlagStateRead;
-        endstop_b_Status &= ~((0) << MyrEndstopFlagStateRead);
-        endstop_b_Status |= (0) << MyrEndstopFlagStateRead;
         return;
     }
 
@@ -203,12 +193,8 @@ void StepperDriver::motorStop(signed int wait_time, unsigned short precision, ui
         return;
     motorID--;
 
-    if (endstop_a_Active || endstop_b_Active)
+    if (isEndstopTripped(endstop_a_Status, GPIO_IO_A) || isEndstopTripped(endstop_b_Status, GPIO_IO_B))
     {
-        endstop_a_Status &= ~((0) << MyrEndstopFlagStateRead);
-        endstop_a_Status |= (0) << MyrEndstopFlagStateRead;
-        endstop_b_Status &= ~((0) << MyrEndstopFlagStateRead);
-        endstop_b_Status |= (0) << MyrEndstopFlagStateRead;
         return;
     }
 
@@ -248,55 +234,62 @@ void StepperDriver::isrStartIoDriver()
 
 void IRAM_ATTR StepperDriver::endstop_a_interrupt()
 {
-    bool stateNow = digitalRead(GPIO_IO_A);
-    
-    if(endstop_a_Status & MyrEndstopMaskStateRead)
-    {
-        endstop_a_Status &= ~MyrEndstopMaskCounter;
-    }
-
-    if((endstop_a_Status & MyrEndstopMaskCounter) < MyrEndstopMaskCounter)
-    {
-        endstop_a_Status++;
-    }
-
-    endstop_a_Status &= ~(MyrEndstopFlagStatePrevious);
-    endstop_a_Status |= (endstop_a_Status & MyrEndstopMaskStateNow) << 1; // MyrEndstopFlagStatePrevious is one bit to the left from MyrEndstopFlagStateNow
-    endstop_a_Status &= ~(MyrEndstopFlagStateNow);
-    endstop_a_Status |= (stateNow) << MyrEndstopFlagStateNow;
-    endstop_a_Status |= 0x1 << MyrEndstopFlagStateChanged;
-
-    endstop_a_Active = stateNow == endstopTrippedState ? true : false;
-
+    endstopIsrUpdateFlags(endstop_a_Status, GPIO_IO_A);
 }
 
 void IRAM_ATTR StepperDriver::endstop_b_interrupt()
 {
-    bool stateNow = digitalRead(GPIO_IO_B);
-    
-    if(endstop_b_Status & MyrEndstopMaskStateRead)
+    endstopIsrUpdateFlags(endstop_b_Status, GPIO_IO_B);
+}
+
+void IRAM_ATTR StepperDriver::endstopIsrUpdateFlags(uint32_t &flags, uint8_t pin)
+{
+    bool isPinHigh = digitalRead(pin);
+    bool isTripped = 0;
+
+    if (isPinHigh == isEndstopTrippedHigh) // check if pin is at configured tripped/engaged/error state. 
     {
-        endstop_b_Status &= ~MyrEndstopMaskCounter;
+        isTripped = true;
+    }
+    else
+    {
+        isTripped = false;
     }
 
-    if((endstop_b_Status & MyrEndstopMaskCounter) < MyrEndstopMaskCounter)
+    if (flags & MyrEndstopMaskStateRead) // Reset counter, tripped and, read status if values have been read
     {
-        endstop_b_Status++;
+        flags &= ~(MyrEndstopMaskTripped | MyrEndstopMaskStateRead | MyrEndstopMaskCounter); // Reset counter, tripped and, read status
     }
 
-    endstop_b_Status &= ~(MyrEndstopFlagStatePrevious);
-    endstop_b_Status |= (endstop_b_Status & MyrEndstopMaskStateNow) << 1; // MyrEndstopFlagStatePrevious is one bit to the left from MyrEndstopFlagStateNow
-    endstop_b_Status &= ~(MyrEndstopFlagStateNow);
-    endstop_b_Status |= (stateNow) << MyrEndstopFlagStateNow;
-    endstop_b_Status |= 0x1 << MyrEndstopFlagStateChanged;
+    if (isPinHigh != (((flags) >> (MyrEndstopFlagStateNow)) & 0x01)) // If pin changed
+    {
+        flags |= MyrEndstopMaskStateChanged; // System status has changed
 
-    endstop_b_Active = stateNow == endstopTrippedState ? true : false;
+        if ((flags & MyrEndstopMaskCounter) < MyrEndstopMaskCounter) // increment edge transisiton counter
+        {
+            flags++;
+        }
+    }
     
+    flags &= ~MyrEndstopMaskStatePrevious;          // Clear previous state
+    flags |= (flags & MyrEndstopMaskStateNow) << 1; // Update old value into previous state // MyrEndstopFlagStatePrevious is one bit to the left from MyrEndstopFlagStateNow
+    flags &= ~MyrEndstopMaskStateNow;               // Clear now state
+    flags |= isPinHigh << MyrEndstopFlagStateNow;   // Update with new current state
+    flags |= isTripped << MyrEndstopFlagTripped;    // Set trip state
+}
+
+bool StepperDriver::isEndstopTripped(uint32_t &flags, uint8_t pin)
+{
+    bool retValue = flags & MyrEndstopMaskTripped ? true : false;
+    flags |= MyrEndstopMaskStateRead;     // Set read state
+    flags &= ~MyrEndstopMaskStateChanged; // Clear changed notification
+    endstopIsrUpdateFlags(flags, pin);
+    return retValue;
 }
 
 void StepperDriver::isrStopIoDriver()
 {
-    setStepRate(0);
+    setStepRate(0); // TODO: clean me
 }
 
 void StepperDriver::isrIoStep(void *pvParameters)
@@ -312,14 +305,11 @@ void StepperDriver::checkLocation()
     {
         setStepRate(0);
         commandDone[0] = true;
-    } else if(endstop_a_Active || endstop_b_Active)
+    }
+    else if (isEndstopTripped(endstop_a_Status, GPIO_IO_A) || isEndstopTripped(endstop_b_Status, GPIO_IO_B))
     {
         setStepRate(0);
         commandDone[0] = true;
-        endstop_a_Status &= ~((0) << MyrEndstopFlagStateRead);
-        endstop_a_Status |= (0) << MyrEndstopFlagStateRead;
-        endstop_b_Status &= ~((0) << MyrEndstopFlagStateRead);
-        endstop_b_Status |= (0) << MyrEndstopFlagStateRead;
     }
 }
 
