@@ -46,12 +46,26 @@ static uint8_t peekRate = 5;
 #define PCNT_THRESH0_VAL -1
 
 bool const positiveDirection = true;
-bool DRAM_ATTR const isEndstopTrippedHigh = false; // Value of endstop when it is engaged.
 uint32_t direction = 0;
 uint32_t DRAM_ATTR paused = 0;
 uint32_t DRAM_ATTR command_done = 1;
-uint32_t DRAM_ATTR endstop_a_Status = 0;
-uint32_t DRAM_ATTR endstop_b_Status = 0;
+
+
+bool DRAM_ATTR const            isEndstopTrippedHigh        = false; // Value of endstop when it is engaged.
+uint32_t DRAM_ATTR static       debounceTimeMs              = 10;    // millis
+
+static DRAM_ATTR portMUX_TYPE   endstopAMux                 = portMUX_INITIALIZER_UNLOCKED;
+bool DRAM_ATTR static           isEndstopA_ActiveNow        = false;
+uint32_t DRAM_ATTR volatile     numberOfEndstopAIsr         = 0;
+bool DRAM_ATTR                  lastStateEndstopAIsr        = 0;
+uint32_t DRAM_ATTR volatile     debounceTimeoutEndstopAIsr  = 0;
+
+static DRAM_ATTR portMUX_TYPE   endstopBMux                 = portMUX_INITIALIZER_UNLOCKED;
+bool DRAM_ATTR static           isEndstopB_ActiveNow        = false;
+uint32_t DRAM_ATTR volatile     numberOfEndstopBIsr         = 0;
+bool DRAM_ATTR volatile         lastStateEndstopBIsr        = 0;
+uint32_t DRAM_ATTR volatile     debounceTimeoutEndstopBIsr  = 0;
+
 uint16_t stepsPerRev = 200;
 uint16_t mircoSteps = 1;
 int32_t DRAM_ATTR location = 0;
@@ -102,6 +116,9 @@ void StepperDriver::initMotorGpio()
     digitalWrite(GPIO_USTEP_MS3, LOW);
     pinMode(GPIO_STEP_DIR, OUTPUT);
     digitalWrite(GPIO_STEP_DIR, LOW);
+
+    endstop_a_interrupt();
+    endstop_b_interrupt();
 }
 
 void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID)
@@ -111,7 +128,7 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
         return;
     motorID--; //motors are 1-15, we want 0-14
 
-    if (isEndstopTripped(endstop_a_Status, GPIO_IO_A) || isEndstopTripped(endstop_b_Status, GPIO_IO_B))
+    if (isEndstopTripped())
     {
         return;
     }
@@ -156,7 +173,7 @@ void StepperDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorI
         return;
     motorID--;
 
-    if (isEndstopTripped(endstop_a_Status, GPIO_IO_A) || isEndstopTripped(endstop_b_Status, GPIO_IO_B))
+    if (isEndstopTripped())
     {
         return;
     }
@@ -193,7 +210,7 @@ void StepperDriver::motorStop(signed int wait_time, unsigned short precision, ui
         return;
     motorID--;
 
-    if (isEndstopTripped(endstop_a_Status, GPIO_IO_A) || isEndstopTripped(endstop_b_Status, GPIO_IO_B))
+    if (isEndstopTripped())
     {
         return;
     }
@@ -234,58 +251,90 @@ void StepperDriver::isrStartIoDriver()
 
 void IRAM_ATTR StepperDriver::endstop_a_interrupt()
 {
-    endstopIsrUpdateFlags(endstop_a_Status, GPIO_IO_A);
+    //endstopMux
+    portENTER_CRITICAL_ISR(&endstopAMux);
+    numberOfEndstopAIsr++;
+    lastStateEndstopAIsr = digitalRead(GPIO_IO_A);
+    debounceTimeoutEndstopAIsr = xTaskGetTickCount(); // ISR safe version of millis() 
+    portEXIT_CRITICAL_ISR(&endstopAMux);
 }
 
 void IRAM_ATTR StepperDriver::endstop_b_interrupt()
 {
-    endstopIsrUpdateFlags(endstop_b_Status, GPIO_IO_B);
+    portENTER_CRITICAL_ISR(&endstopBMux);
+    numberOfEndstopBIsr++;
+    lastStateEndstopBIsr = digitalRead(GPIO_IO_B);
+    debounceTimeoutEndstopBIsr = xTaskGetTickCount(); // ISR safe version of millis() 
+    portEXIT_CRITICAL_ISR(&endstopBMux);
 }
 
-void IRAM_ATTR StepperDriver::endstopIsrUpdateFlags(uint32_t &flags, uint8_t pin)
+bool IRAM_ATTR StepperDriver::isEndstopTripped()
 {
-    bool isPinHigh = digitalRead(pin);
-    bool isTripped = 0;
+    uint32_t saveDebounceTimeout;
+    bool saveLastState;
+    int hasChanged;
+    bool currentState = false;
+    bool retunValue = false;
 
-    if (isPinHigh == isEndstopTrippedHigh) // check if pin is at configured tripped/engaged/error state. 
-    {
-        isTripped = true;
-    }
-    else
-    {
-        isTripped = false;
-    }
+    //endstopA
+    portENTER_CRITICAL_ISR(&endstopAMux);
+    hasChanged  = numberOfEndstopAIsr;
+    saveDebounceTimeout = debounceTimeoutEndstopAIsr;
+    saveLastState  = lastStateEndstopAIsr;
+    portEXIT_CRITICAL_ISR(&endstopAMux);
+    
+    currentState = digitalRead(GPIO_IO_A);
 
-    if (flags & MyrEndstopMaskStateRead) // Reset counter, tripped and, read status if values have been read
-    {
-        flags &= ~(MyrEndstopMaskTripped | MyrEndstopMaskStateRead | MyrEndstopMaskCounter); // Reset counter, tripped and, read status
-    }
-
-    if (isPinHigh != (((flags) >> (MyrEndstopFlagStateNow)) & 0x01)) // If pin changed
-    {
-        flags |= MyrEndstopMaskStateChanged; // System status has changed
-
-        if ((flags & MyrEndstopMaskCounter) < MyrEndstopMaskCounter) // increment edge transisiton counter
+    // if Interrupt Has triggered AND pin is in same state AND the debounce time has expired THEN endstop is stable
+    if ((hasChanged != 0) && (currentState == saveLastState) && (millis() - saveDebounceTimeout > debounceTimeMs ))
+    { 
+        portENTER_CRITICAL_ISR(&endstopAMux);
+        numberOfEndstopAIsr = 0; // clear counter
+        portEXIT_CRITICAL_ISR(&endstopAMux);
+        
+        if (currentState == isEndstopTrippedHigh)
         {
-            flags++;
+            isEndstopA_ActiveNow = true;
+        }
+        else
+        {
+            isEndstopA_ActiveNow = false;
         }
     }
+
+    retunValue |= isEndstopA_ActiveNow;
+
+    //endstopB
+    portENTER_CRITICAL_ISR(&endstopBMux);
+    hasChanged  = numberOfEndstopBIsr;
+    saveDebounceTimeout = debounceTimeoutEndstopBIsr;
+    saveLastState  = lastStateEndstopBIsr;
+    portEXIT_CRITICAL_ISR(&endstopBMux);
     
-    flags &= ~MyrEndstopMaskStatePrevious;          // Clear previous state
-    flags |= (flags & MyrEndstopMaskStateNow) << 1; // Update old value into previous state // MyrEndstopFlagStatePrevious is one bit to the left from MyrEndstopFlagStateNow
-    flags &= ~MyrEndstopMaskStateNow;               // Clear now state
-    flags |= isPinHigh << MyrEndstopFlagStateNow;   // Update with new current state
-    flags |= isTripped << MyrEndstopFlagTripped;    // Set trip state
+    currentState = digitalRead(GPIO_IO_B);
+
+    // if Interrupt Has triggered AND pin is in same state AND the debounce time has expired THEN endstop is stable
+    if ((hasChanged != 0) && (currentState == saveLastState) && (millis() - saveDebounceTimeout > debounceTimeMs ))
+    { 
+        portENTER_CRITICAL_ISR(&endstopBMux);
+        numberOfEndstopBIsr = 0; // clear counter
+        portEXIT_CRITICAL_ISR(&endstopBMux);
+      
+        if (currentState == isEndstopTrippedHigh)
+        {
+            isEndstopB_ActiveNow = true;
+        }
+        else
+        {
+            isEndstopB_ActiveNow = false;
+        }
+    }
+
+    retunValue |= isEndstopB_ActiveNow;
+    
+    return retunValue;
 }
 
-bool StepperDriver::isEndstopTripped(uint32_t &flags, uint8_t pin)
-{
-    bool retValue = flags & MyrEndstopMaskTripped ? true : false;
-    flags |= MyrEndstopMaskStateRead;     // Set read state
-    flags &= ~MyrEndstopMaskStateChanged; // Clear changed notification
-    endstopIsrUpdateFlags(flags, pin);
-    return retValue;
-}
 
 void StepperDriver::isrStopIoDriver()
 {
@@ -306,7 +355,7 @@ void StepperDriver::checkLocation()
         setStepRate(0);
         commandDone[0] = true;
     }
-    else if (isEndstopTripped(endstop_a_Status, GPIO_IO_A) || isEndstopTripped(endstop_b_Status, GPIO_IO_B))
+    else if (isEndstopTripped())
     {
         setStepRate(0);
         commandDone[0] = true;
