@@ -38,6 +38,7 @@ static uint8_t peekRate = 5;
 //end stop
 #define GPIO_IO_A 21
 #define GPIO_IO_B 22
+#define MYR_DEFAULT_DEBOUNCE_MS 10 // TODO: NVS config
 
 #define PCNT_UNIT PCNT_UNIT_0
 #define PCNT_H_LIM_VAL 100
@@ -52,7 +53,7 @@ uint32_t DRAM_ATTR command_done = 1;
 
 
 bool DRAM_ATTR const            isEndstopTrippedHigh        = false; // Value of endstop when it is engaged.
-uint32_t DRAM_ATTR static       debounceTimeMs              = 10;    // millis
+uint32_t DRAM_ATTR static       debounceTimeMs              = MYR_DEFAULT_DEBOUNCE_MS;    // millis // TODO: NVS config
 
 static DRAM_ATTR portMUX_TYPE   endstopAMux                 = portMUX_INITIALIZER_UNLOCKED;
 bool DRAM_ATTR static           isEndstopA_ActiveNow        = false;
@@ -272,7 +273,7 @@ bool IRAM_ATTR StepperDriver::isEndstopTripped()
 {
     uint32_t saveDebounceTimeout;
     bool saveLastState;
-    int hasChanged;
+    uint32_t hasChanged;
     bool currentState = false;
     bool retunValue = false;
 
