@@ -36,6 +36,7 @@ private:
     TaskHandle_t motorTaskHandle;
     static void IRAM_ATTR endstop_a_interrupt();
     static void IRAM_ATTR endstop_b_interrupt();
+    static bool IRAM_ATTR  isEndstopTripped();
     static void setStepRate(int32_t rate);
     static void addSteps(uint32_t steps);
     static void addSteps(uint32_t steps, uint16_t microstepRate);
@@ -70,6 +71,8 @@ private:
     bool isValidOpCode(Op *);
     void getNextOpForDriver(uint8_t id);
     void peekOpForDriver(uint8_t id);
+
+
 };
 
 #endif /* _ServoDriver_H_ */
