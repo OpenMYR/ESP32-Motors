@@ -15,7 +15,16 @@
     as your personal WiFi ssid and pass. DefaultConfig should only be changed if you intend on 
     pushing your changes upstream.
 */
-#define SERVO
+
+#ifndef SERVO
+#define SERVO   (1)
+#endif
+#ifndef STEPPER
+#define STEPPER (0)
+#endif
+#ifndef BDC
+#define BDC     (0)
+#endif
 
 #define MYR_WIFI_MODE_AP            000001
 #define MYR_WIFI_MODE_STATION       0x0002

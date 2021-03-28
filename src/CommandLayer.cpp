@@ -22,13 +22,11 @@ MotorDriver *CommandLayer::driver = NULL;
 CommandLayer::CommandLayer()
 {
 
-#ifdef SERVO
+#if SERVO==1
     driver = ServoDriver::getInstance();
-#endif
-#ifdef STEPPER
+#elif STEPPER==1
     driver = StepperDriver::getInstance();
-#endif
-#ifdef BDC
+#elif BDC==1
     driver = BrushedMotorDriver::getInstance();
 #endif
     log_v("CommandLayer const\n");
