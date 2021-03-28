@@ -3,7 +3,7 @@ by [OpenMYR](http://www.OpenMYR.com/)
 
 OpenMYR WiFi motors can be controled via WiFi, or programed with an Arduino sketch. At the core of the system is an Espressif ESP32.
 
-[![CI_Test](https://github.com/chradams/ESP32-Motors/actions/workflows/main.yml/badge.svg?branch=github-actions)](https://github.com/chradams/ESP32-Motors/actions/workflows/main.yml)
+[![Default_CI](https://github.com/chradams/ESP32-Motors/actions/workflows/main.yml/badge.svg?branch=master)](https://github.com/chradams/ESP32-Motors/actions/workflows/main.yml)
 
 This project utilizes PlatformIO with Visual Studio Code
 
