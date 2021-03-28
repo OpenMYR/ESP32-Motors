@@ -40,4 +40,4 @@ jobs:
           pip install --upgrade platformio
       - name: Build
         run: |
-          platformio run -e esp32dev
+          platformio run -e esp32
