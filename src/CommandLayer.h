@@ -15,6 +15,7 @@ public:
     static void opcodeMove(signed int step_num, unsigned short step_rate, uint8_t motor_id);
     static void opcodeGoto(signed int step_num, unsigned short step_rate, uint8_t motor_id);
     static void opcodeStop(signed int wait_time, unsigned short precision, uint8_t motor_id);
+    static void opcodeSleep(signed int wait_time, unsigned short precision, uint8_t motor_id);
     static void opcodeMotorSetting(MotorDriver::config_setting setting, uint32_t data1, uint32_t data2, uint8_t motor_id);
     static void opcodeAbortCommand(uint8_t motor_id);
     static void getNextOp(uint8_t driverId);

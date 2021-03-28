@@ -25,6 +25,7 @@ class MotorDriver
         virtual void motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID);
         virtual void motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID);
         virtual void motorStop(signed int wait_time, unsigned short precision, uint8_t motor_id);
+        virtual void motorSleep(signed int wait_time, unsigned short precision, uint8_t motor_id);
         virtual void abortCommand(uint8_t motorID);
 
     protected:

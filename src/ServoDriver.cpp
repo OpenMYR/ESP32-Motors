@@ -12,6 +12,8 @@ CommandLayer *commandInstance = NULL;
 static uint8_t peekTicks = 5;
 static uint8_t peekRate = 5;
 
+uint8_t servoPin[MAX_MOTORS] = {32, 33, 25, 26, 27, 14, 12, 15, 22, 21, 19, 18, 4, 16, 17};
+
 int minUs = 500;
 int maxUs = 2400;
 
@@ -40,21 +42,9 @@ ServoDriver *IRAM_ATTR ServoDriver::getInstance()
 
 void ServoDriver::initMotorGpio()
 {
-    servo[0].attach(32);
-    servo[1].attach(33);
-    servo[2].attach(25);
-    servo[3].attach(26);
-    servo[4].attach(27);
-    servo[5].attach(14);
-    servo[6].attach(12);
-    servo[7].attach(15);
-    servo[8].attach(22);
-    servo[9].attach(21);
-    servo[10].attach(19);
-    servo[11].attach(18);
-    servo[12].attach(4);
-    servo[13].attach(16);
-    servo[14].attach(17);
+    for(int i=0; i<MAX_MOTORS; i++){
+        servo[i].attach(servoPin[i]);
+    }
 }
 
 void ServoDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID)
@@ -62,8 +52,14 @@ void ServoDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID)
     if (motorID > MAX_MOTORS)
         return;
     motorID--; //motors are 1-15, we want 0-14
+    
+    if(motorSleeping[motorID]){
+        motorSleeping[motorID] = false;
+        servo[motorID].attach(servoPin[motorID]);
+    }
 
     motorDwell[motorID] = false;
+    motorSleeping[motorID] = false;
     startAngle[motorID] = currentAngle[motorID];
     commandDeltaAngle[motorID] = targetAngle - currentAngle[motorID];
     startTime[motorID] = esp_timer_get_time();
@@ -80,8 +76,14 @@ void ServoDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorID)
     if (rate == 0)
         return;
     motorID--; //motors are 1-15, we want 0-14
+    
+    if(motorSleeping[motorID]){
+        motorSleeping[motorID] = false;
+        servo[motorID].attach(servoPin[motorID]);
+    }
 
     motorDwell[motorID] = false;
+    motorSleeping[motorID] = false;
     startAngle[motorID] = currentAngle[motorID];
     commandDeltaAngle[motorID] = targetAngle - currentAngle[motorID];
     startTime[motorID] = esp_timer_get_time();
@@ -98,11 +100,36 @@ void ServoDriver::motorStop(signed int wait_time, unsigned short precision, uint
     if (motorID > MAX_MOTORS)
         return;
     motorID--;
+    
+    if(motorSleeping[motorID]){
+        motorSleeping[motorID] = false;
+        servo[motorID].attach(servoPin[motorID]);
+    }
 
     motorDwell[motorID] = true;
+    motorSleeping[motorID] = false;
     startTime[0] = esp_timer_get_time();
     commandDeltaTime[motorID] = (abs(wait_time) * precision);
     commandDone[motorID] = false;
+
+    log_v("command %d %d %d %d ", startAngle[motorID], commandDeltaAngle[motorID], startTime[motorID], commandDeltaTime[motorID]);
+}
+
+void ServoDriver::motorSleep(signed int wait_time, unsigned short precision, uint8_t motorID)
+{
+    // wait_time, cycles to wait
+    // precision, duration of wait cycle in milliseconds
+    if (motorID > MAX_MOTORS)
+        return;
+    motorID--;
+
+    motorDwell[motorID] = true;
+    motorSleeping[motorID] = true;
+    startTime[0] = esp_timer_get_time();
+    commandDeltaTime[motorID] = (abs(wait_time) * precision);
+    commandDone[motorID] = false;
+
+    servo[motorID].detach();
 
     log_v("command %d %d %d %d ", startAngle[motorID], commandDeltaAngle[motorID], startTime[motorID], commandDeltaTime[motorID]);
 }

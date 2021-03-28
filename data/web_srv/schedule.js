@@ -6,7 +6,8 @@ var angle = document.getElementById("angleInput");
 var commandButtons = [
 	document.getElementById("cr0"),
 	document.getElementById("cr1"),
-	document.getElementById("cr2")
+	document.getElementById("cr2"),
+	document.getElementById("cr3")
 ];
 var motorSelector = [
 	document.getElementById("motorIdSelector")
@@ -18,9 +19,9 @@ var floatInputs = [
 var duration = document.getElementById("duration");
 //predefines
 var maxSentCommands = 10;
-var buttonOpCode = ["M", "G", "S"];
-var buttonCommands = ["Move", "Goto", "Stop"];
-var buttonCommandDisplays = ["Move a relative distance.", "Goto an absolute position.", "Stop and dwell for some time."];
+var buttonOpCode = ["M", "G", "S","I"];
+var buttonCommands = ["Move", "Goto", "Stop","Sleep"];
+var buttonCommandDisplays = ["Move a relative distance.", "Goto an absolute position.", "Stop and dwell for some time.", "Stop and sleep motor for some time."];
 //variables
 var selectedButton = -1;
 var selectedMotor = -1;
@@ -63,6 +64,8 @@ document.getElementById("add").addEventListener("click", function(){
 		var stepRateInputValue = parseFloat(floatInputs[1].value);
 		if(selectedButton == 2){
 			addStop(selectedMotor, queueFlag, parseFloat(duration.value));
+		} else if(selectedButton == 3){
+			addSleep(selectedMotor, queueFlag, parseFloat(duration.value));
 		} else {
 			addMove(selectedMotor, buttonOpCode[selectedButton], queueFlag, stepInputValue, stepRateInputValue);
 		}
@@ -83,16 +86,18 @@ function modeSelected(buttonNum){
 	selectedButton = buttonNum;
 	commandButtons[buttonNum].style.backgroundColor = "#157e15";
 	commandButtons[buttonNum].style.color = "#fff";
-	commandButtons[(buttonNum + 1) % 3].style.backgroundColor = "#ffffff00";
-	commandButtons[(buttonNum + 2) % 3].style.backgroundColor = "#ffffff00";
-	commandButtons[(buttonNum + 1) % 3].style.color = "#000";
-	commandButtons[(buttonNum + 2) % 3].style.color = "#000";
+	commandButtons[(buttonNum + 1) % 4].style.backgroundColor = "#ffffff00";
+	commandButtons[(buttonNum + 2) % 4].style.backgroundColor = "#ffffff00";
+	commandButtons[(buttonNum + 3) % 4].style.backgroundColor = "#ffffff00";
+	commandButtons[(buttonNum + 1) % 4].style.color = "#000";
+	commandButtons[(buttonNum + 2) % 4].style.color = "#000";
+	commandButtons[(buttonNum + 3) % 4].style.color = "#000";
 	command.innerHTML = buttonCommandDisplays[buttonNum];
-	duration.style.backgroundColor = (buttonNum == 2)?"#fff":"#c3c3c3";
-	duration.readOnly = !(buttonNum == 2);
+	duration.style.backgroundColor = ((buttonNum == 2) || (buttonNum == 3))?"#fff":"#c3c3c3";
+	duration.readOnly = !((buttonNum == 2) || (buttonNum == 3));
 	for (var a = 0; a < floatInputs.length; a++){
-		floatInputs[a].style.backgroundColor = !(buttonNum == 2)?"#fff":"#c3c3c3";
-		floatInputs[a].readOnly = (buttonNum == 2);
+		floatInputs[a].style.backgroundColor = !((buttonNum == 2) || (buttonNum == 3))?"#fff":"#c3c3c3";
+		floatInputs[a].readOnly = ((buttonNum == 2) || (buttonNum == 3));
 	}
 }
 function motorSelected(motorNum){
@@ -181,9 +186,13 @@ function isValidCommand(){
 	}
 	return isValid;
 }
-function addStop(motorid, queueFlag,time){
+function addStop(motorid, queueFlag, time){
 	stepInputValue = Math.round(stopCountsPerSecond * time);
 	addCommand(motorid, "S", queueFlag, stepInputValue, stopCountsPerSecond);
+}
+function addSleep(motorid, queueFlag, time){
+	stepInputValue = Math.round(stopCountsPerSecond * time);
+	addCommand(motorid, "I", queueFlag, stepInputValue, stopCountsPerSecond);
 }
 function addMove(motorid, code, queueFlag, stepInputValue, stepRateInputValue){
 	stepInputValue = Math.round(stepInputValue);

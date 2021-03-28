@@ -118,6 +118,7 @@ bool CommandParser::decodeCommand(JsonObject *cmd)
     case 'M':
     case 'S':
     case 'G':
+    case 'I':
     {
         parseMotorCommand(cmd, *code);
         break;
