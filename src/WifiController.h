@@ -31,6 +31,9 @@ class WifiController {
         static esp_err_t startTCP();
         static esp_err_t saveValue(String id, const String* value);
         static esp_err_t saveValue(String id, uint8_t value);
+        static esp_err_t changeModeToAp();
+        static esp_err_t changeModeToSta();
+        static esp_err_t changeModeToApSta();
 };
 
 #endif /* _WifiController_H_ */

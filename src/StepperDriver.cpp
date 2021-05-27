@@ -13,6 +13,7 @@
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "soc/gpio_sig_map.h"
+#include "freertos/ringbuf.h"
 
 #define CORE_1 1
 #define UPDATE_FREQ 1000

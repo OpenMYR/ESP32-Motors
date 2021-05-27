@@ -17,12 +17,15 @@
 */
 #define SERVO
 
+#define MYR_REMEMBER_CHANGES true   // If false, every boot will be as though it is the first time the device has started
+
 #define MYR_WIFI_MODE_AP            000001
 #define MYR_WIFI_MODE_STATION       0x0002
 #define MYR_WIFI_MODE_AP_STATION    0x0004
 
 #define MYR_WIFI_START_IN_MODE MYR_WIFI_MODE_AP
 #define MYR_WIFI_SUPPORTED_MODES MYR_WIFI_MODE_AP | MYR_WIFI_MODE_STATION
+#define MYR_WIFI_MAINTAIN_AP false // If false the device will take down a running AP after it successfully connect to a station
 
 #define MYR_WIFI_DEFAULT_AP_SSID_UID_CHAR_COUNT 4
 
@@ -32,8 +35,10 @@ const String MYR_WIFI_DEFAULT_AP_PASS = "";
 const String MYR_WIFI_DEFAULT_STATION_SSID = "ssid";    //Do not define these in DefaultConfig.h, see warning above
 const String MYR_WIFI_DEFAULT_STATION_PASS = "pass";
 
-#define MYR_WIFI_STATION_FAIL_TO_AP 1;  //If the device fails to connect, should it establish an AP
+#define MYR_WIFI_STATION_FAIL_TO_AP 1  // If the device fails to connect, should it establish an AP
 
-#define MYR_WIFI_STA_RETRIES 5;
+#define MYR_WIFI_STATION_RETRIES 5 // How many times should the devce attempt to connect to a network before putting up an AP
+#define MYR_WIFI_STA_RETRY_INTERVAL 10000 // Time in ms between attempts
+#define MYR_WIFI_STA_RETRY_INTERVAL_LONG 5000 // Time in ms between attempts, after the AP is up
 
 #endif
