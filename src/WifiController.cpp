@@ -121,7 +121,7 @@ esp_err_t WifiController::setApCredentials(const String* newSsid, const String* 
 }
 
 esp_err_t WifiController::setStaCredentials(const String* newSsid, const String* newPass, bool save) {
-    log_i("ssid: %s", newSsid);
+    log_i("ssid: %s", newSsid->c_str());
     esp_err_t err = ERR_OK;
     staSsid = *newSsid;
     staPass = *newPass; 
@@ -148,7 +148,9 @@ esp_err_t WifiController::changeMode(uint8_t mode, bool save) {
                 ESP_ERROR_CHECK(err);
             }
 
+            state = MYR_WIFI_STATE_AP;
             err = changeModeToAp();
+            ESP_ERROR_CHECK(err);
 
             if (save) saveValue(MYR_WIFI_PREF_TAG_MODE, MYR_WIFI_MODE_AP);
 
@@ -164,12 +166,16 @@ esp_err_t WifiController::changeMode(uint8_t mode, bool save) {
                 ESP_ERROR_CHECK(err);
             }
 
-            err = changeModeToApSta();
+            state = MYR_WIFI_STATE_STA_CONNECTING;
+            err = changeModeToSta();
+            ESP_ERROR_CHECK(err);
 
             if (save) saveValue(MYR_WIFI_PREF_TAG_MODE, MYR_WIFI_MODE_STATION);
             
-                err = esp_wifi_set_mode(WIFI_MODE_APSTA);
-                esp_wifi_start();
+            err = esp_wifi_start();
+            ESP_ERROR_CHECK(err);
+            // err = esp_wifi_connect();
+            // ESP_ERROR_CHECK(err);
 
             break;   
         } 
@@ -177,11 +183,21 @@ esp_err_t WifiController::changeMode(uint8_t mode, bool save) {
         {        
             log_i("Entering AP/STA mode");
 
+            retries = MYR_WIFI_STATION_RETRIES;
+
             if (state == MYR_WIFI_STATE_STA) {
                 err = esp_wifi_disconnect();
                 ESP_ERROR_CHECK(err);
             }
+            
+            state = MYR_WIFI_STATE_AP_STA_CONNECTING;
+            err = changeModeToApSta();
+            ESP_ERROR_CHECK(err);
 
+            err = esp_wifi_start();
+            ESP_ERROR_CHECK(err);
+
+            break;
         }
         default:
             return ESP_ERR_NOT_SUPPORTED;
@@ -210,8 +226,7 @@ esp_err_t WifiController::changeModeToAp() {
     }
     err = esp_wifi_set_config(WIFI_IF_AP, &configAp);
     if (err) return err;
-    
-    state = MYR_WIFI_STATE_AP;
+
     return ERR_OK;
 }
 
@@ -227,13 +242,19 @@ esp_err_t WifiController::changeModeToSta() {
     err = esp_wifi_set_config(WIFI_IF_STA, &configSta);
     if (err) return err;
 
-    log_i("ssid is %s", staSsid);
-
-    state = MYR_WIFI_STATE_STA_CONNECTING;
+    log_i("ssid is %s", staSsid.c_str());
     return ERR_OK;
 }
 
 esp_err_t WifiController::changeModeToApSta() {
+    esp_err_t err = changeModeToAp();
+    if (err) return err;
+    err = changeModeToSta();
+    if (err) return err;
+    err = esp_wifi_set_mode(WIFI_MODE_APSTA);
+    if (err) return err;
+    err = esp_wifi_start();
+    if (err) return err;
     return ERR_OK;
 }
 
@@ -372,7 +393,7 @@ void WifiController::event_handler(void *arg, system_event_t *event)
             uint8_t reason = event->event_info.disconnected.reason;
             log_w("Reason: %u - %s", reason, wifi_err_reason_to_str(reason));
             if (reason == WIFI_REASON_ASSOC_LEAVE) {
-                if (state == MYR_WIFI_STATE_STA_CONNECTING) {
+                if (state == MYR_WIFI_STATE_STA_CONNECTING || state == MYR_WIFI_STATE_AP_STA_CONNECTING) {
                     esp_wifi_connect();
                 }
             } else if (retries >= 0) {
@@ -381,6 +402,7 @@ void WifiController::event_handler(void *arg, system_event_t *event)
                 delay(MYR_WIFI_STA_RETRY_INTERVAL);
                 esp_wifi_connect();
             } else {
+                //todo
                 log_i("Failed to connect, starting fallback AP");
                 state = MYR_WIFI_STATE_STA_FAIL;
                 changeMode(MYR_WIFI_MODE_AP, false);

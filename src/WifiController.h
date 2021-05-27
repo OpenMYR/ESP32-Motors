@@ -14,7 +14,10 @@ extern "C" {
 #define MYR_WIFI_STATE_STA 2 
 #define MYR_WIFI_STATE_STA_FAIL 3 
 #define MYR_WIFI_STATE_STA_CONNECTING 4 
-#define MYR_WIFI_STATE_ERROR 5 
+#define MYR_WIFI_STATE_AP_STA 5 
+#define MYR_WIFI_STATE_AP_STA_FAIL 6 
+#define MYR_WIFI_STATE_AP_STA_CONNECTING 7 
+#define MYR_WIFI_STATE_ERROR 8
 
 class WifiController {
     public:
