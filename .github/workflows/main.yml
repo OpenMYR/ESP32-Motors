@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, linux-latest]
+        os: [windows-latest, macos-latest, ubuntu-latest]
         python-version: [3.7]
     # The type of runner that the job will run on
     runs-on: ${{ matrix.os }}
