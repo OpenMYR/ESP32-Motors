@@ -2,8 +2,8 @@
 #define _WifiController_H_
 
 #include <WString.h>
-#include <String.h>
-#include <Wifi.h>
+#include <string.h>
+#include <WiFi.h>
 #include <esp_wifi.h>
 extern "C" {
 #include <tcpip_adapter.h>
