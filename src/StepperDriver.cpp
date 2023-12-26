@@ -8,6 +8,8 @@
 
 #include "driver/periph_ctrl.h"
 #include "driver/ledc.h"
+#include <soc/pcnt_struct.h>
+#include <soc/pcnt_reg.h>
 #include "driver/gpio.h"
 #include "driver/pcnt.h"
 #include "esp_attr.h"
