@@ -5,7 +5,8 @@ var angle = document.getElementById("angleInput");
 var commandButtons = [
 	document.getElementById("cr0"),
 	document.getElementById("cr1"),
-	document.getElementById("cr2")
+	document.getElementById("cr2"),
+	document.getElementById("cr3")
 ];
 var unitButtons = [
 	document.getElementById("unitDegree"),
@@ -26,13 +27,13 @@ var stepsPerRotation = 200;
 var microSteps = 32;
 //predefines
 var maxSentCommands = 10;
-var buttonOpCode = ["M", "G", "S"];
-var buttonCommands = ["Move", "Goto", "Stop"];
+var buttonOpCode = ["M", "G", "S", "I"];
+var buttonCommands = ["Move", "Goto", "Stop","Sleep"];
 var amountUnits = ["Degrees", "Steps"];
 var speedUnits = ["Degrees/Sec", "Steps/Sec"];
 var c = 261, d = 294, e = 329, f = 349, g = 391, gS = 415, a = 440, aS = 455, b = 466, cH = 523,
 	cSH = 554, dH = 587, dSH = 622, eH = 659, fH = 698, fSH = 740, gH = 784, gSH = 830, aH = 880;
-var buttonCommandDisplays = ["Move a relative distance.", "Goto an absolute position.", "Stop and dwell for some time."];
+var buttonCommandDisplays = ["Move a relative distance.", "Goto an absolute position.", "Stop and dwell for some time.", "Stop and sleep motor for some time."];
 //variables
 var selectedButton = -1;
 var selectedUnit = 0;
@@ -69,6 +70,8 @@ document.getElementById("add").addEventListener("click", function(){
 		isMicroStepping = microStepCheckbox.checked;
 		if(selectedButton == 2){
 			addStop(1, parseFloat(duration.value));
+		} else if(selectedButton == 3){
+			addSleep(1, parseFloat(duration.value));
 		} else {
 			addMove(1, buttonOpCode[selectedButton], getSteps(), getStepRate());
 		}
@@ -88,16 +91,18 @@ function modeSelected(buttonNum){
 	selectedButton = buttonNum;
 	commandButtons[buttonNum].style.backgroundColor = "#157e15";
 	commandButtons[buttonNum].style.color = "#fff";
-	commandButtons[(buttonNum + 1) % 3].style.backgroundColor = "#ffffff00";
-	commandButtons[(buttonNum + 2) % 3].style.backgroundColor = "#ffffff00";
-	commandButtons[(buttonNum + 1) % 3].style.color = "#000";
-	commandButtons[(buttonNum + 2) % 3].style.color = "#000";
+	commandButtons[(buttonNum + 1) % 4].style.backgroundColor = "#ffffff00";
+	commandButtons[(buttonNum + 2) % 4].style.backgroundColor = "#ffffff00";
+	commandButtons[(buttonNum + 3) % 4].style.backgroundColor = "#ffffff00";
+	commandButtons[(buttonNum + 1) % 4].style.color = "#000";
+	commandButtons[(buttonNum + 2) % 4].style.color = "#000";
+	commandButtons[(buttonNum + 3) % 4].style.color = "#000";
 	command.innerHTML = buttonCommandDisplays[buttonNum];
-	duration.style.backgroundColor = (buttonNum == 2)?"#fff":"#c3c3c3";
-	duration.readOnly = !(buttonNum == 2);
+	duration.style.backgroundColor = ((buttonNum == 2) || (buttonNum == 3))?"#fff":"#c3c3c3";
+	duration.readOnly = !((buttonNum == 2) || (buttonNum == 3));
 	for (var a = 0; a < floatInputs.length; a++){
-		floatInputs[a].style.backgroundColor = !(buttonNum == 2)?"#fff":"#c3c3c3";
-		floatInputs[a].readOnly = (buttonNum == 2);
+		floatInputs[a].style.backgroundColor = !((buttonNum == 2) || (buttonNum == 3))?"#fff":"#c3c3c3";
+		floatInputs[a].readOnly = ((buttonNum == 2) || (buttonNum == 3));
 	}
 }
 function unitSelected(unitNum){
@@ -226,6 +231,12 @@ function addStop(motorid, time){
 	var queueFlag = commandList.commands.length ? 1 : 0;
 	stepInputValue = Math.round(stopCountsPerSecond * time);
 	addCommand(motorid, "S", queueFlag, stepInputValue, stopCountsPerSecond);
+}
+function addSleep(motorid, time){
+	checkMicroStep(motorid);
+	var queueFlag = commandList.commands.length ? 1 : 0;
+	stepInputValue = Math.round(stopCountsPerSecond * time);
+	addCommand(motorid, "I", queueFlag, stepInputValue, stopCountsPerSecond);
 }
 function addMove(motorid, code, stepInputValue, stepRateInputValue){
 	checkMicroStep(motorid);

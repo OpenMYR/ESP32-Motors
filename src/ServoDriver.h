@@ -22,6 +22,7 @@ public:
     void motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID);
     void motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID);
     void motorStop(int32_t wait_time, uint16_t precision, uint8_t motorID);
+    void motorSleep(signed int wait_time, unsigned short precision, uint8_t motor_id);
     void abortCommand(uint8_t motorID);
 
     static ServoDriver *IRAM_ATTR getInstance();
@@ -46,6 +47,7 @@ private:
 
     servo_conf confs[MAX_MOTORS];
     bool motorDwell[MAX_MOTORS] = {0};
+    bool motorSleeping[MAX_MOTORS] = {0};
 
     bool commandDone[MAX_MOTORS] = {1};
     uint16_t currentAngle[MAX_MOTORS] = {0};

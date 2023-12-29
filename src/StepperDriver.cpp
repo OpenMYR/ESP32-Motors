@@ -149,7 +149,12 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
         direction = positiveDirection;
     }
     digitalWrite(GPIO_STEP_DIR, direction);
-
+    
+    if(motorSleeping){
+        motorSleeping = false;
+        setSleep(motorSleeping);
+    }
+    
     motorDwell = false;
 
     if (limit > 0)
@@ -184,6 +189,11 @@ void StepperDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorI
     uint32_t limit = abs(targetAngle);
     direction = targetAngle > 0 ? positiveDirection : !positiveDirection;
     digitalWrite(GPIO_STEP_DIR, direction);
+    
+    if(motorSleeping){
+        motorSleeping = false;
+        setSleep(motorSleeping);
+    }
 
     motorDwell = false;
 
@@ -222,8 +232,37 @@ void StepperDriver::motorStop(signed int wait_time, unsigned short precision, ui
     startTime[0] = esp_timer_get_time();
     commandDeltaTime[motorID] = startTime[0] + (abs(wait_time) * precision);
     commandDone[motorID] = false;
+    
+    if(motorSleeping){
+        motorSleeping = false;
+        setSleep(motorSleeping);
+    }
 
     setStepRate(0);
+
+    log_d("command %d %d %d %d ", startAngle[motorID], commandDeltaAngle[motorID], startTime[motorID], commandDeltaTime[motorID]);
+}
+
+void StepperDriver::motorSleep(signed int wait_time, unsigned short precision, uint8_t motorID)
+{
+    // wait_time, cycles to wait
+    // precision, duration of wait cycle in milliseconds
+    if (motorID > motorsControlled)
+        return;
+    motorID--;
+
+    if (isEndstopTripped())
+    {
+        return;
+    }
+
+    motorDwell = true;
+    startTime[0] = esp_timer_get_time();
+    commandDeltaTime[motorID] = startTime[0] + (abs(wait_time) * precision);
+    commandDone[motorID] = false;
+
+    setSleep(true);
+    motorSleeping = true;
 
     log_d("command %d %d %d %d ", startAngle[motorID], commandDeltaAngle[motorID], startTime[motorID], commandDeltaTime[motorID]);
 }
@@ -548,6 +587,22 @@ void StepperDriver::setStepRate(int32_t rate)
         digitalWrite(GPIO_STEP, LOW);
     }
 }
+
+void StepperDriver::setSleep(boolean sleep)
+{
+    setStepRate(0);
+
+    if(sleep){
+        digitalWrite(GPIO_STEP_ENABLE, HIGH);
+    }
+    else
+    {
+        digitalWrite(GPIO_STEP_ENABLE, LOW);
+    }
+
+}
+
+
 /* 
 void StepperDriver::addSteps(uint32_t steps)
 {

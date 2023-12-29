@@ -62,6 +62,11 @@ void CommandLayer::opcodeStop(signed int wait_time, unsigned short precision, ui
     CommandLayer::driver->motorStop(wait_time, precision, motor_id);
 }
 
+void CommandLayer::opcodeSleep(signed int step_num, unsigned short step_rate, uint8_t motor_id)
+{
+    CommandLayer::driver->motorSleep(step_num, step_rate, motor_id);
+}
+
 void CommandLayer::opcodeMotorSetting(MotorDriver::config_setting setting, uint32_t data1, uint32_t data2, uint8_t motor_id)
 {
     CommandLayer::driver->changeMotorSettings(setting, data1, data2, motor_id);
@@ -117,9 +122,15 @@ void CommandLayer::parseSubmittOp(uint8_t id, Op *op)
         opcodeGoto(op->stepNum, op->stepRate, op->motorID);
         break;
     }
+    case 'I':
+    {
+        opcodeSleep(op->stepNum, op->stepRate, op->motorID);
+        break;
+    }
     case 'U':
     {
         opcodeMotorSetting(MotorDriver::config_setting::MICROSTEPPING, op->stepRate, op->motorID, op->motorID);
+        break;
     }
     default:
         //log_i("parseSubmittOp Unknown packet");

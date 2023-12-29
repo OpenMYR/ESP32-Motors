@@ -21,6 +21,7 @@ public:
     void motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID);
     void motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorID);
     void motorStop(int32_t wait_time, uint16_t precision, uint8_t motorID);
+    void motorSleep(int32_t wait_time, uint16_t precision, uint8_t motorID);
     void abortCommand(uint8_t motorID);
     static StepperDriver *IRAM_ATTR getInstance();
     void changeMotorSettings(MotorDriver::config_setting setting, uint32_t data1, uint32_t data2, uint8_t motorID);
@@ -38,6 +39,7 @@ private:
     static void IRAM_ATTR endstop_b_interrupt();
     static bool IRAM_ATTR  isEndstopTripped();
     static void setStepRate(int32_t rate);
+    static void setSleep(boolean sleep);
     static void addSteps(uint32_t steps);
     static void addSteps(uint32_t steps, uint16_t microstepRate);
     static uint16_t getMicroStepRate();
@@ -56,6 +58,7 @@ private:
 
     stepper_conf confs[MAX_STEPPER_MOTORS];
     bool motorDwell = false;
+    bool motorSleeping = false;
 
     bool commandDone[MAX_STEPPER_MOTORS] = {1};
     double_t currentAngle[MAX_STEPPER_MOTORS] = {0};  // angle is integer of steps in stepper driver.
