@@ -258,8 +258,8 @@ esp_err_t WifiController::startTCP() {
     lease.end_ip.addr = static_cast<uint32_t>(localIP) + (11 << 24);
 
     err = tcpip_adapter_dhcps_option(
-        (tcpip_adapter_option_mode_t)TCPIP_ADAPTER_OP_SET,
-        (tcpip_adapter_option_id_t)TCPIP_ADAPTER_REQUESTED_IP_ADDRESS,
+        TCPIP_ADAPTER_OP_SET,
+        TCPIP_ADAPTER_REQUESTED_IP_ADDRESS,
         (void*)&lease, sizeof(dhcps_lease_t)
     );
     if (err) return err;

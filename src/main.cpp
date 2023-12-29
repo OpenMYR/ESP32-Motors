@@ -28,10 +28,13 @@
 #include <ESPmDNS.h>
 #include <ArduinoOTA.h>
 
-#ifdef SERVO
-#define STATUSLEDPIN 13
+#if (SERVO + STEPPER + BDC) > 1
+#error "Too many device types enabled"
 #endif
-#ifdef STEPPER
+
+#if SERVO==1
+#define STATUSLEDPIN 13
+#elif STEPPER==1
 #define STATUSLEDPIN 17
 #endif
 

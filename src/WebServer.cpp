@@ -14,10 +14,9 @@ String const TAG = "WebServer";
 AsyncWebServer server(80);
 
 
-#ifdef SERVO
+#if SERVO==1
 #define MOTOR_TYPE 0
-#endif
-#ifdef STEPPER
+#elif STEPPER==1
 #define MOTOR_TYPE 1
 #endif
 
