@@ -180,6 +180,8 @@ esp_err_t WifiController::changeMode(uint8_t mode, bool save) {
             } else {  
                 err = esp_wifi_set_mode(WIFI_MODE_STA);
                 ESP_ERROR_CHECK(err);
+
+                err = esp_wifi_stop();
             }
 
             wifi_config_t configSta;
@@ -193,6 +195,7 @@ esp_err_t WifiController::changeMode(uint8_t mode, bool save) {
             log_i("ssid is %s", staSsid);
 
             state = MYR_WIFI_STATE_STA_CONNECTING;
+            err = esp_wifi_start();
             if (save) saveValue(MYR_WIFI_PREF_TAG_MODE, MYR_WIFI_MODE_STATION);
 
             break;   
