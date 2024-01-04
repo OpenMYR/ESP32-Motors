@@ -146,16 +146,24 @@ void CommandParser::parseConfig(JsonObject *cmd, char code)
         log_i("Malformed data array!");
         return;
     }
-
+    esp_err_t err;
     String ssid = dataArray[0];
     String pass = dataArray[1];
 
     if(code == 'C') {
-        WifiController::setStaCredentials(&ssid, &pass, true);
-        WifiController::changeMode(MYR_WIFI_MODE_STATION, true);
+        err = WifiController::tryConnectToSta(&ssid, &pass);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        if (err) return;
+        err = WifiController::setDefaultStaCredentials(&ssid, &pass);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        err = WifiController::setDefaultMode(MYR_WIFI_MODE_STATION);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
     }
-    else if(code == 'D') WifiController::changeMode(MYR_WIFI_MODE_AP, true);
-    else if(code == 'O') WifiController::setStaCredentials(&ssid, &pass, true);
+    else if(code == 'D') {
+        WifiController::fireWifiEvent(MYR_WIFI_EVENT_DISCONNECT, NULL);
+        err = WifiController::setDefaultMode(MYR_WIFI_MODE_AP);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+    } else if(code == 'O') WifiController::changeOTAPass(&ssid, &pass);
     else log_i("Unknown command %c", code);
 }
 
