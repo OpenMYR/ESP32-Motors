@@ -85,10 +85,10 @@ esp_err_t WifiController::init() {
     esp_err_t err = startTCP();
     if (err) return err;
 
-    err = esp_wifi_init(&cfg);
+    err = startListener();
     if (err) return err;
 
-    err = startListener();
+    err = esp_wifi_init(&cfg);
     if (err) return err;
 
     esp_wifi_set_storage(WIFI_STORAGE_FLASH);
