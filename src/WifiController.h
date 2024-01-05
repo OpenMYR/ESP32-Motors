@@ -7,6 +7,7 @@
 #include <esp_wifi.h>
 extern "C" {
 #include <tcpip_adapter.h>
+#include "esp_netif.h"
 }
 
 
@@ -36,7 +37,8 @@ class WifiController {
     public:
         static esp_err_t init();
         static void fireWifiEvent(myr_wifi_event_t event, void *data);
-        static void network_event_handler(void *arg, system_event_t *event);
+        //static void network_event_handler(void *arg, system_event_t *event);
+        static void network_event_handler(void* arg, esp_event_base_t base, int32_t id, void* event_data);
         static void state_event_handler(void *arg, esp_event_base_t base, int32_t id, void* event_data);
         static esp_err_t tryConnectToSta(const String* ssid, const String* pass);
 

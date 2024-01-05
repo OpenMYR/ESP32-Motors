@@ -13,7 +13,7 @@
 #include "lwip/netif.h"
 #include "freertos/queue.h"
 
-#include <esp_event_loop.h>
+#include "esp_event.h"  //#include <esp_event_loop.h>
 #include "esp_event_base.h"
 
 #define TAG "WifiController"
@@ -44,9 +44,10 @@ static myr_wifi_state_t state;
 
 static Preferences preferences;
 
-static xQueueHandle _network_event_queue;
-static TaskHandle_t _network_event_task_handle = NULL;
+//static xQueueHandle _network_event_queue;
+//static TaskHandle_t _network_event_task_handle = NULL;
 static EventGroupHandle_t _network_event_group = NULL;
+static EventGroupHandle_t s_wifi_event_group = NULL;  // https://github.com/espressif/esp-idf/blob/master/examples/wifi/getting_started/station/main/station_example_main.c
 
 static esp_event_loop_handle_t state_loop_handle;
 static esp_event_loop_args_t loop_args;
@@ -67,16 +68,17 @@ IPAddress localIP(192, 168, 4, 1);
 IPAddress gateway(192, 168, 4, 1);
 IPAddress subnet(255, 255, 255, 0);
 
-static void _network_event_task(void *arg) {
+/* static void _network_event_task(void *arg) {
     system_event_t *event = NULL;
     for (;;) {
         if (xQueueReceive(_network_event_queue, &event, portMAX_DELAY) == pdTRUE) {
-            WifiController::network_event_handler(arg, event);
+            //WifiController::network_event_handler(arg, event);
+            delay(200);
         }
     }
     vTaskDelete(NULL);
     _network_event_task_handle = NULL;
-}
+} */
 
 esp_err_t WifiController::init() {
     log_i("Initalizing WiFi");
@@ -480,22 +482,31 @@ esp_err_t WifiController::startTCP() {
     return ERR_OK;
 }
 
-static esp_err_t _network_event_cb(void *arg, system_event_t *event) {
+/* static esp_err_t _network_event_cb(void *arg, system_event_t *event) {
     if (xQueueSend(_network_event_queue, &event, portMAX_DELAY) != pdPASS) {
         log_w("Network Event Queue Send Failed!");
         return ESP_FAIL;
     }
     return ESP_OK;
-}
+} */
 
 esp_err_t WifiController::startListener() {
+    
+    esp_err_t err = ESP_OK;
+    err = esp_event_loop_create_default();
+    if (err) return err;
+
+    s_wifi_event_group = xEventGroupCreate();
+
     loop_args = {
         .queue_size = 32,
         .task_name = "state_events",
         .task_priority = 5,
         .task_stack_size = 2048,  //todo no clue what size it should be
         .task_core_id = 1};
-    ESP_ERROR_CHECK(esp_event_loop_create(&loop_args, &state_loop_handle));
+    err = esp_event_loop_create(&loop_args, &state_loop_handle);
+    if (err) return err;
+
     esp_event_handler_register_with(state_loop_handle, MYR_WIFI_EVENT_BASE, ESP_EVENT_ANY_ID, WifiController::state_event_handler, NULL);
 
     if (!_network_event_group) {
@@ -507,57 +518,121 @@ esp_err_t WifiController::startListener() {
         }
         xEventGroupSetBits(_network_event_group, WIFI_DNS_IDLE_BIT);
     }
-    if (!_network_event_queue) {
+/*     if (!_network_event_queue) {
         _network_event_queue = xQueueCreate(32, sizeof(system_event_t *));
         if (!_network_event_queue) {
             log_e("Network Event Queue Create Failed!");
             return ESP_ERR_INVALID_STATE;
         }
-    }
-    if (!_network_event_task_handle) {
+    } */
+/*     if (!_network_event_task_handle) {
         xTaskCreateUniversal(_network_event_task, "network_event", 4096, NULL, ESP_TASKD_EVENT_PRIO - 1, &_network_event_task_handle, CONFIG_ARDUINO_EVENT_RUNNING_CORE);
         if (!_network_event_task_handle) {
             log_e("Network Event Task Start Failed!");
             return ESP_ERR_INVALID_STATE;
         }
-    }
-    return esp_event_loop_init(&_network_event_cb, NULL);
+    } */
+
+    esp_event_handler_instance_t instance_any_id;
+    //esp_event_handler_register_with(event_loop_handle, WIFI_EVENT, ESP_EVENT_ANY_ID, _network_event_cb, NULL);
+    err = esp_event_handler_instance_register(WIFI_EVENT,
+                                              ESP_EVENT_ANY_ID,
+                                              &network_event_handler,
+                                              NULL,
+                                              &instance_any_id);
+    if (err) return err;
+
+    err = esp_event_handler_instance_register(IP_EVENT,
+                                              ESP_EVENT_ANY_ID,
+                                              &network_event_handler,
+                                              NULL,
+                                              &instance_any_id);
+    
+    if (err) return err;
+    return err; //esp_event_loop_init(&_network_event_cb, NULL);
 }
 
 void WifiController::state_event_handler(void *arg, esp_event_base_t base, int32_t id, void *event_data) {
+    log_i("-- %u  %u",id, state);
     transitions[id][state]();
 }
 
-void WifiController::network_event_handler(void *arg, system_event_t *event) {
-    switch (event->event_id) {
-        case SYSTEM_EVENT_WIFI_READY:
+//void WifiController::network_event_handler(void *arg, system_event_t *event) {
+void WifiController::network_event_handler(void* arg, esp_event_base_t base,
+                                   int32_t id, void* event_data)
+{
+    log_i("--- %u    %u", base, id);
+
+    if (base == WIFI_EVENT)
+    {
+        switch (id) 
+        {
+        case WIFI_EVENT_WIFI_READY:
             log_i("WiFi interface ready");
             break;
-        case SYSTEM_EVENT_SCAN_DONE:
+        case WIFI_EVENT_SCAN_DONE:
             log_i("Completed scan for access points");
             break;
-        case SYSTEM_EVENT_STA_START:
+        case WIFI_EVENT_STA_START:            
             log_i("WiFi client started");
             //todo is this needed
             esp_wifi_connect();
             break;
-        case SYSTEM_EVENT_STA_STOP:
+        case WIFI_EVENT_STA_STOP:
             log_i("WiFi clients stopped");
             break;
-        case SYSTEM_EVENT_STA_CONNECTED:
+        case WIFI_EVENT_STA_CONNECTED:
             log_i("Connected to access point");
             break;
-        case SYSTEM_EVENT_STA_DISCONNECTED: {
-            uint8_t reason = event->event_info.disconnected.reason;
+        case WIFI_EVENT_STA_DISCONNECTED: {
+            wifi_event_sta_disconnected_t* event = (wifi_event_sta_disconnected_t*) event_data;
+            uint8_t reason = event->reason;
             log_w("WiFi disconnect, Reason: %u - %s", reason, wifi_err_reason_to_str(reason));
             fireWifiEvent(MYR_WIFI_EVENT_CONNECTION_FAILED, NULL);
             break;
         }
-        case SYSTEM_EVENT_STA_AUTHMODE_CHANGE:
+        case WIFI_EVENT_AP_START:
+            log_i("WiFi access point started");
+            break;
+        case WIFI_EVENT_AP_STOP:
+            log_i("WiFi access point stopped");
+            break;
+        case WIFI_EVENT_AP_STACONNECTED:
+            log_i("Client connected");
+            break;
+        case WIFI_EVENT_AP_STADISCONNECTED:
+            log_i("Client disconnected");
+            break;
+        case WIFI_EVENT_STA_AUTHMODE_CHANGE:
             log_i("Authentication mode of access point has changed");
             break;
-        case SYSTEM_EVENT_STA_GOT_IP: {
-            uint8_t *spa = (uint8_t *)&(event->event_info.got_ip.ip_info.ip.addr);
+        case WIFI_EVENT_STA_WPS_ER_SUCCESS:
+            log_i("WiFi Protected Setup (WPS): succeeded in enrollee mode");
+            break;
+        case WIFI_EVENT_STA_WPS_ER_FAILED:
+            log_i("WiFi Protected Setup (WPS): failed in enrollee mode");
+            break;
+        case WIFI_EVENT_STA_WPS_ER_TIMEOUT:
+            log_i("WiFi Protected Setup (WPS): timeout in enrollee mode");
+            break;
+        case WIFI_EVENT_STA_WPS_ER_PIN:
+            log_i("WiFi Protected Setup (WPS): pin code in enrollee mode");
+            break;
+        case WIFI_EVENT_AP_PROBEREQRECVED:
+            log_i("Received probe request");
+            break;
+        default:
+            log_i("Unknown event");
+            break;
+        }
+    } else if (base == IP_EVENT)
+    {
+        switch (id) 
+        {
+            case IP_EVENT_STA_GOT_IP: {
+            //
+            ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+            uint8_t *spa = (uint8_t *)&(event->ip_info.ip.addr);
             log_i("Obtained IP address: %u.%u.%u.%u", spa[0], spa[1], spa[2], spa[3]);
 
             ip = String("");
@@ -585,43 +660,24 @@ void WifiController::network_event_handler(void *arg, system_event_t *event) {
 
             break;
         }
-        case SYSTEM_EVENT_STA_LOST_IP:
+        case IP_EVENT_STA_LOST_IP:
             log_i("Lost IP address and IP address is reset to 0");
             break;
-        case SYSTEM_EVENT_STA_WPS_ER_SUCCESS:
-            log_i("WiFi Protected Setup (WPS): succeeded in enrollee mode");
-            break;
-        case SYSTEM_EVENT_STA_WPS_ER_FAILED:
-            log_i("WiFi Protected Setup (WPS): failed in enrollee mode");
-            break;
-        case SYSTEM_EVENT_STA_WPS_ER_TIMEOUT:
-            log_i("WiFi Protected Setup (WPS): timeout in enrollee mode");
-            break;
-        case SYSTEM_EVENT_STA_WPS_ER_PIN:
-            log_i("WiFi Protected Setup (WPS): pin code in enrollee mode");
-            break;
-        case SYSTEM_EVENT_AP_START:
-            log_i("WiFi access point started");
-            break;
-        case SYSTEM_EVENT_AP_STOP:
-            log_i("WiFi access point stopped");
-            break;
-        case SYSTEM_EVENT_AP_STACONNECTED:
-            log_i("Client connected");
-            break;
-        case SYSTEM_EVENT_AP_STADISCONNECTED:
-            log_i("Client disconnected");
-            break;
-        case SYSTEM_EVENT_AP_STAIPASSIGNED:
-            log_i("IP assigned");
-            break;
-        case SYSTEM_EVENT_AP_PROBEREQRECVED:
-            log_i("Received probe request");
-            break;
-        case SYSTEM_EVENT_GOT_IP6:
+        case IP_EVENT_GOT_IP6:
             log_i("IPv6 is preferred");
             break;
-        case SYSTEM_EVENT_ETH_START:
+        case IP_EVENT_ETH_GOT_IP:
+            log_i("Obtained IP address");
+            break;
+        case IP_EVENT_AP_STAIPASSIGNED:
+            log_i("IP assigned");
+            break;
+        default:
+            log_i("Unknown event");
+            break;
+        }
+    }
+        /* case SYSTEM_EVENT_ETH_START:
             log_i("Ethernet started");
             break;
         case SYSTEM_EVENT_ETH_STOP:
@@ -632,12 +688,5 @@ void WifiController::network_event_handler(void *arg, system_event_t *event) {
             break;
         case SYSTEM_EVENT_ETH_DISCONNECTED:
             log_i("Ethernet disconnected");
-            break;
-        case SYSTEM_EVENT_ETH_GOT_IP:
-            log_i("Obtained IP address");
-            break;
-        default:
-            log_i("Unknown event");
-            break;
-    }
+            break; */
 }
