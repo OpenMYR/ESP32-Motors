@@ -68,6 +68,8 @@ IPAddress localIP(192, 168, 4, 1);
 IPAddress gateway(192, 168, 4, 1);
 IPAddress subnet(255, 255, 255, 0);
 
+static esp_netif_t *ap_netif;
+static esp_netif_t *sta_netif;
 /* static void _network_event_task(void *arg) {
     system_event_t *event = NULL;
     for (;;) {
@@ -84,10 +86,10 @@ esp_err_t WifiController::init() {
     log_i("Initalizing WiFi");
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
 
-    esp_err_t err = startTCP();
+    esp_err_t err = startListener();
     if (err) return err;
 
-    err = startListener();
+    err = startTCP();
     if (err) return err;
 
     err = esp_wifi_init(&cfg);
@@ -447,16 +449,20 @@ void WifiController::generateSsid() {
 
 esp_err_t WifiController::startTCP() {
     esp_err_t err;
-    tcpip_adapter_init();
-
-    tcpip_adapter_ip_info_t info;
+    esp_netif_init();
+    if (err) return err;
+    
+    esp_netif_ip_info_t info;
     info.ip.addr = static_cast<uint32_t>(localIP);
     info.gw.addr = static_cast<uint32_t>(gateway);
     info.netmask.addr = static_cast<uint32_t>(subnet);
 
-    err = tcpip_adapter_dhcps_stop(TCPIP_ADAPTER_IF_AP);
+    ap_netif = esp_netif_create_default_wifi_ap();
+    sta_netif = esp_netif_create_default_wifi_sta();
+
+    err = esp_netif_dhcps_stop(ap_netif);
     if (err) return err;
-    err = tcpip_adapter_set_ip_info(TCPIP_ADAPTER_IF_AP, &info);
+    err = esp_netif_set_ip_info(ap_netif, &info);
     if (err) return err;
 
     dhcps_lease_t lease;
@@ -464,17 +470,18 @@ esp_err_t WifiController::startTCP() {
     lease.start_ip.addr = static_cast<uint32_t>(localIP) + (1 << 24);
     lease.end_ip.addr = static_cast<uint32_t>(localIP) + (11 << 24);
 
-    err = tcpip_adapter_dhcps_option(
-        TCPIP_ADAPTER_OP_SET,
-        TCPIP_ADAPTER_REQUESTED_IP_ADDRESS,
+    err = esp_netif_dhcps_option(
+        ap_netif,
+        ESP_NETIF_OP_SET,
+        ESP_NETIF_REQUESTED_IP_ADDRESS,
         (void *)&lease, sizeof(dhcps_lease_t));
     if (err) return err;
 
-    err = tcpip_adapter_dhcps_start(TCPIP_ADAPTER_IF_AP);
+    err = esp_netif_dhcps_start(ap_netif);
     if (err) return err;
 
-    tcpip_adapter_ip_info_t ip;
-    err = tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_AP, &ip);
+    esp_netif_ip_info_t ip;
+    err = esp_netif_get_ip_info(ap_netif, &ip);
     if (err) return err;
 
     uint8_t *ipa = (uint8_t *)&(ip.ip.addr);

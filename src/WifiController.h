@@ -6,7 +6,6 @@
 #include <Wifi.h>
 #include <esp_wifi.h>
 extern "C" {
-#include <tcpip_adapter.h>
 #include "esp_netif.h"
 }
 
