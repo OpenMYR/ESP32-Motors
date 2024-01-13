@@ -1,5 +1,10 @@
+// Includes for unit test framework
 #include <Arduino.h>
 #include <unity.h>
+
+// Includes for project libraries
+#include <FS.h>
+#include <WiFi.h>
 
 
 void setUp(void) {
@@ -15,7 +20,7 @@ void setup()
 {
     delay(2000); // service delay
     UNITY_BEGIN();
-
+    //RUN_TEST();
 
     UNITY_END(); // stop unit testing
 }
