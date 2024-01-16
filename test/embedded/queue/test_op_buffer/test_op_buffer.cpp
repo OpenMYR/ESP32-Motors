@@ -131,6 +131,16 @@ void overfill_buffer(void){
 void clear_buffer(void){
     
     bool failing = false;
+    uint8_t data[11] = {0x00, 0x00, 'S', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    Op opIn(data);
+    opIn.motorID = 0;
+
+    
+    for (size_t i = 0; i < _bufferCount; i++)
+    {
+        opIn.motorID = i;
+        _opBuffer->storeOp(&opIn); 
+    }
 
     for (size_t i = 0; i < _bufferCount; i++)
     {
@@ -145,10 +155,20 @@ void clear_buffer(void){
 }
 
 void reset_opBuffer(void){
-    
+        
     bool failing = false;
+    uint8_t data[11] = {0x00, 0x00, 'S', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    Op opIn(data);
+    opIn.motorID = 0;
+
+    for (size_t i = 0; i < _bufferCount; i++)
+    {
+        opIn.motorID = i;
+        _opBuffer->storeOp(&opIn); 
+    }
 
     _opBuffer->reset();
+    
     for (size_t i = 0; i < _bufferCount; i++)
     {
         if(_opBuffer->isEmpty(i) != true)
