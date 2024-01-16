@@ -155,7 +155,7 @@ void clear_buffer(void){
 }
 
 void reset_opBuffer(void){
-        
+    
     bool failing = false;
     uint8_t data[11] = {0x00, 0x00, 'S', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
     Op opIn(data);
@@ -168,7 +168,7 @@ void reset_opBuffer(void){
     }
 
     _opBuffer->reset();
-    
+
     for (size_t i = 0; i < _bufferCount; i++)
     {
         if(_opBuffer->isEmpty(i) != true)

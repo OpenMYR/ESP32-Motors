@@ -168,7 +168,7 @@ bool OpBuffer::isFull(uint8_t id)
 void OpBuffer::reset()
 {
 	//memset(opQueue, 0, sizeof(opQueue));
-	for (int i = 0; i < OP_BUFFER_COUNT - 1; i++)
+	for (int i = 0; i < OP_BUFFER_COUNT; i++)
 	{
 		clear(i);
 	}
