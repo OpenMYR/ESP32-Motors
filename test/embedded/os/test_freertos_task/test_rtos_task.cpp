@@ -38,7 +38,7 @@ static void _taskFunc(void *);
 static void _taskFunc(void *){
     while (true)
     {
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(10));
         _localTestVar = true;
     }
     vTaskDelete(NULL);
@@ -57,6 +57,7 @@ void setup_new_pinnedTask(void){
         _core);
 
     TEST_ASSERT_NOT_NULL(_task);
+    vTaskDelay(100);
 
     vTaskDelete(_task);
 
