@@ -86,7 +86,7 @@ void setup()
                 type = "filesystem";
 
             // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
-            log_d("Start updating " + type);
+            log_d("Start updating %s", type.c_str());
         })
         .onEnd([]() {
             log_d("\nEnd");
