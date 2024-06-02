@@ -25,13 +25,13 @@ void test_wifi_default_to_ap(void){
     TEST_ASSERT_EQUAL(WifiController::MYR_WIFI_STATE_AP, WifiController::getWiFiState());
 }
 
-void test_wifi_sta_to_sta(void){
+void test_wifi_ap_to_sta(void){
 
     String ssid = "test";
     String pass = "test";
 
     TEST_ASSERT_EQUAL(ESP_OK, WifiController::tryConnectToSta(&ssid, &pass));
-    TEST_ASSERT_EQUAL(WifiController::MYR_WIFI_STATE_AP_STA_CONNECTING, WifiController::getWiFiState());   // can this be MYR_WIFI_STATE_STA_CONNECTING or MYR_WIFI_STATE_AP_STA_CONNECTING
+    TEST_ASSERT_EQUAL(WifiController::MYR_WIFI_STATE_AP_STA_CONNECTING, WifiController::getWiFiState());  // can this be MYR_WIFI_STATE_STA_CONNECTING or MYR_WIFI_STATE_AP_STA_CONNECTING
 }
 
 void test_wifi_sta_to_ap(void){
@@ -76,8 +76,8 @@ void setup()
     UNITY_BEGIN();
 
     RUN_TEST(test_wifi_default_to_ap);
+    RUN_TEST(test_wifi_ap_to_sta);
     RUN_TEST(test_wifi_sta_credentials);
-    RUN_TEST(test_wifi_sta_to_sta);
     RUN_TEST(test_wifi_sta_to_ap);
     RUN_TEST(test_wifi_ap_credentials);
     RUN_TEST(test_setDefaultApCredentials);
