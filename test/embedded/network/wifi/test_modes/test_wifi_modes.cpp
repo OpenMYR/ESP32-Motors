@@ -2,12 +2,13 @@
 #include <unity.h>
 
 #include "WifiController.h"
+#include <Preferences.h>
 #include "../../src/config/DefaultConfig.h"
 
+static Preferences preferences;
 
 void setUp(void) {
-    // set stuff up here
-    WifiController::init();
+    // set stuff up here    
 }
 
 void tearDown(void) {
@@ -15,24 +16,30 @@ void tearDown(void) {
 }
 
 void test_wifi_default_to_sta(void){
+    
+    preferences.begin("myr", false);
+    preferences.putUChar(WifiController::MYR_WIFI_PREF_TAG_INIT, 1);
+    preferences.putUChar(WifiController::MYR_WIFI_PREF_TAG_MODE, MYR_WIFI_MODE_STATION);
+    preferences.end();
+    
+    TEST_ASSERT_EQUAL(ESP_OK, WifiController::init());
+    TEST_ASSERT_EQUAL(WifiController::MYR_WIFI_STATE_STA, WifiController::getWiFiState());
 
-    esp_err_t err;
-    err = WifiController::changeMode(MYR_WIFI_MODE_STATION, false);
-    TEST_ASSERT_TRUE(err == false);
 }
 
 void test_wifi_sta_to_sta(void){
 
-    esp_err_t err;
-    err = WifiController::changeMode(MYR_WIFI_MODE_STATION, false);
-    TEST_ASSERT_TRUE(err == false);
+    String ssid = "test";
+    String pass = "test";
+
+    TEST_ASSERT_EQUAL(ESP_OK, WifiController::tryConnectToSta(&ssid, &pass));
+    TEST_ASSERT_EQUAL(WifiController::MYR_WIFI_STATE_STA_CONNECTING, WifiController::getWiFiState());
 }
 
 void test_wifi_sta_to_ap(void){
 
-    esp_err_t err;
-    err = WifiController::changeMode(MYR_WIFI_MODE_AP, false);
-    TEST_ASSERT_TRUE(err == false);
+    WifiController::fireWifiEvent(WifiController::MYR_WIFI_EVENT_DISCONNECT, NULL);
+    TEST_ASSERT_EQUAL(WifiController::MYR_WIFI_STATE_AP, WifiController::getWiFiState());
 }
 
 void test_wifi_sta_credentials(void){
@@ -41,24 +48,27 @@ void test_wifi_sta_credentials(void){
     String ssid = "Test";
     String pass = "Test";
     
-    err = WifiController::setStaCredentials(&ssid, &pass, true);
-    TEST_ASSERT_TRUE(err == false);
-
-    err = WifiController::changeMode(MYR_WIFI_MODE_STATION, false);
-    TEST_ASSERT_TRUE(err == false);
+    TEST_ASSERT_EQUAL(ESP_OK, WifiController::setDefaultStaCredentials(&ssid, &pass));
 }
 
 void test_wifi_ap_credentials(void){
 
-    esp_err_t err;
     String ssid = "Test";
     String pass = "Test";
     
-    err = WifiController::setApCredentials(&ssid, &pass, true);
-    TEST_ASSERT_TRUE(err == false);
-    
-    err = WifiController::changeMode(MYR_WIFI_MODE_AP, true);
-    TEST_ASSERT_TRUE(err == false);
+    TEST_ASSERT_EQUAL(ESP_OK, WifiController::setDefaultApCredentials(&ssid, &pass));
+}
+
+void test_setDefaultApCredentials(void) {
+    String ssid = "TestAP";
+    String pass = "password";
+    TEST_ASSERT_EQUAL(ESP_OK, WifiController::setDefaultApCredentials(&ssid, &pass));
+}
+
+void test_setDefaultStaCredentials(void) {
+    String ssid = "TestSTA";
+    String pass = "password";
+    TEST_ASSERT_EQUAL(ESP_OK, WifiController::setDefaultStaCredentials(&ssid, &pass));
 }
 
 void setup()
@@ -68,10 +78,12 @@ void setup()
     UNITY_BEGIN();
 
     RUN_TEST(test_wifi_default_to_sta);
+    RUN_TEST(test_wifi_sta_credentials);
     RUN_TEST(test_wifi_sta_to_sta);
     RUN_TEST(test_wifi_sta_to_ap);
-    //RUN_TEST(test_wifi_sta_credentials);
-    //RUN_TEST(test_wifi_ap_credentials);
+    RUN_TEST(test_wifi_ap_credentials);
+    RUN_TEST(test_setDefaultApCredentials);
+    RUN_TEST(test_setDefaultStaCredentials);
 
     UNITY_END(); // stop unit testing
 }

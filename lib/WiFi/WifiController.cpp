@@ -425,6 +425,10 @@ void WifiController::generateSsid() {
     myrSsid += md5_out;
 }
 
+WifiController::myr_wifi_state_t WifiController::getWiFiState() {
+    return state;
+}
+
 esp_err_t WifiController::startTCP() {
     esp_err_t err = esp_netif_init();
     if (err) return err;

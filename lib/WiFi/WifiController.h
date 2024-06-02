@@ -44,6 +44,15 @@ public:
     static esp_err_t setDefaultStaCredentials(const String* ssid, const String* pass);
     static esp_err_t setDefaultMode(uint8_t mode);
     static void changeOTAPass(const String* oldPass, const String* pass);
+    static myr_wifi_state_t getWiFiState();
+    
+    // Constants
+    static constexpr const char* MYR_WIFI_PREF_TAG_INIT = "WiFi Init";
+    static constexpr const char* MYR_WIFI_PREF_TAG_MODE = "WiFi Mode";
+    static constexpr const char* MYR_WIFI_PREF_TAG_STA_SSID = "WiFi StaSsid";
+    static constexpr const char* MYR_WIFI_PREF_TAG_STA_PASS = "WiFi StaPass";
+    static constexpr const char* MYR_WIFI_PREF_TAG_AP_SSID = "WiFi ApSsid";
+    static constexpr const char* MYR_WIFI_PREF_TAG_AP_PASS = "WiFi ApPass";
 
 private:
     static void initMode(uint8_t mode);
@@ -73,14 +82,6 @@ private:
     static esp_err_t changeModeToAp();
     static esp_err_t changeModeToSta();
     static esp_err_t changeModeToApSta();
-
-    // Constants
-    static constexpr const char* MYR_WIFI_PREF_TAG_INIT = "WiFi Init";
-    static constexpr const char* MYR_WIFI_PREF_TAG_MODE = "WiFi Mode";
-    static constexpr const char* MYR_WIFI_PREF_TAG_STA_SSID = "WiFi StaSsid";
-    static constexpr const char* MYR_WIFI_PREF_TAG_STA_PASS = "WiFi StaPass";
-    static constexpr const char* MYR_WIFI_PREF_TAG_AP_SSID = "WiFi ApSsid";
-    static constexpr const char* MYR_WIFI_PREF_TAG_AP_PASS = "WiFi ApPass";
 
     static String myrSsid;
     static int attempts;
