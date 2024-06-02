@@ -9,20 +9,13 @@
 #include <esp_log.h>
 #include <MD5Builder.h>
 #include <ArduinoOTA.h>
-#include <Preferences.h>
 #include "lwip/netif.h"
 #include "freertos/queue.h"
 
-#include "esp_event.h"  //#include <esp_event_loop.h>
+#include "esp_event.h"
 #include "esp_event_base.h"
 
 #define TAG "WifiController"
-#define MYR_WIFI_PREF_TAG_INIT "WiFi Init"
-#define MYR_WIFI_PREF_TAG_MODE "WiFi Mode"
-#define MYR_WIFI_PREF_TAG_STA_SSID "WiFi StaSsid"
-#define MYR_WIFI_PREF_TAG_STA_PASS "WiFi StaPass"
-#define MYR_WIFI_PREF_TAG_AP_SSID "WiFi ApSsid"
-#define MYR_WIFI_PREF_TAG_AP_PASS "WiFi ApPass"
 
 ESP_EVENT_DEFINE_BASE(MYR_WIFI_EVENT_BASE);
 
@@ -38,52 +31,37 @@ VoidFunction WifiController::transitions[5][5] = {
         {fDoNothing             ,fDoNothing             ,fConnInterval          ,fConnInterval          ,fCloseAP               }, //Event: TIMER              
 };
 
-static String myrSsid = "";
-static int attempts = 0;
-static myr_wifi_state_t state;
+String WifiController::myrSsid = "";
+int WifiController::attempts = 0;
+WifiController::myr_wifi_state_t WifiController::state;
 
-static Preferences preferences;
+Preferences WifiController::preferences;
+EventGroupHandle_t WifiController::_network_event_group = NULL;
+EventGroupHandle_t WifiController::s_wifi_event_group = NULL;  // https://github.com/espressif/esp-idf/blob/master/examples/wifi/getting_started/station/main/station_example_main.c
 
-//static xQueueHandle _network_event_queue;
-//static TaskHandle_t _network_event_task_handle = NULL;
-static EventGroupHandle_t _network_event_group = NULL;
-static EventGroupHandle_t s_wifi_event_group = NULL;  // https://github.com/espressif/esp-idf/blob/master/examples/wifi/getting_started/station/main/station_example_main.c
+esp_event_loop_handle_t WifiController::state_loop_handle;
+esp_event_loop_args_t WifiController::loop_args;
 
-static esp_event_loop_handle_t state_loop_handle;
-static esp_event_loop_args_t loop_args;
+int WifiController::stateConnTimeoutLatch = 1;
 
-static int stateConnTimeoutLatch = 1;
+TaskHandle_t WifiController::ipMessageTaskHandle;
+TimerHandle_t WifiController::stateTimerHandle = NULL;
 
-static TaskHandle_t ipMessageTaskHandle;
-static TimerHandle_t stateTimerHandle = NULL;
+String WifiController::apSsid;
+String WifiController::apPass;
+String WifiController::staSsid;
+String WifiController::staPass;
+String WifiController::ip;
 
-static String apSsid;
-static String apPass;
-static String staSsid;
-static String staPass;
+IPAddress WifiController::localIP(192, 168, 4, 1);
+IPAddress WifiController::gateway(192, 168, 4, 1);
+IPAddress WifiController::subnet(255, 255, 255, 0);
 
-static String ip;
-
-IPAddress localIP(192, 168, 4, 1);
-IPAddress gateway(192, 168, 4, 1);
-IPAddress subnet(255, 255, 255, 0);
-
-static esp_netif_t *ap_netif;
-static esp_netif_t *sta_netif;
-/* static void _network_event_task(void *arg) {
-    system_event_t *event = NULL;
-    for (;;) {
-        if (xQueueReceive(_network_event_queue, &event, portMAX_DELAY) == pdTRUE) {
-            //WifiController::network_event_handler(arg, event);
-            delay(200);
-        }
-    }
-    vTaskDelete(NULL);
-    _network_event_task_handle = NULL;
-} */
+esp_netif_t *WifiController::ap_netif;
+esp_netif_t *WifiController::sta_netif;
 
 esp_err_t WifiController::init() {
-    log_i("Initalizing WiFi");
+    log_i("Initializing WiFi");
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
 
     esp_err_t err = startListener();
@@ -426,9 +404,9 @@ esp_err_t WifiController::saveValue(String id, const String *value) {
     preferences.end();
     return ERR_OK;
 }
+
 esp_err_t WifiController::saveValue(String id, const uint8_t value) {
     if (!preferences.begin("myr", false)) return ERR_ALREADY;
-    preferences.begin("myr", false);
     preferences.putUChar(id.c_str(), value);
     preferences.end();
     return ERR_OK;
@@ -448,8 +426,7 @@ void WifiController::generateSsid() {
 }
 
 esp_err_t WifiController::startTCP() {
-    esp_err_t err;
-    esp_netif_init();
+    esp_err_t err = esp_netif_init();
     if (err) return err;
     
     esp_netif_ip_info_t info;
@@ -489,18 +466,8 @@ esp_err_t WifiController::startTCP() {
     return ERR_OK;
 }
 
-/* static esp_err_t _network_event_cb(void *arg, system_event_t *event) {
-    if (xQueueSend(_network_event_queue, &event, portMAX_DELAY) != pdPASS) {
-        log_w("Network Event Queue Send Failed!");
-        return ESP_FAIL;
-    }
-    return ESP_OK;
-} */
-
 esp_err_t WifiController::startListener() {
-    
-    esp_err_t err = ESP_OK;
-    err = esp_event_loop_create_default();
+    esp_err_t err = esp_event_loop_create_default();
     if (err) return err;
 
     s_wifi_event_group = xEventGroupCreate();
@@ -509,8 +476,9 @@ esp_err_t WifiController::startListener() {
         .queue_size = 32,
         .task_name = "state_events",
         .task_priority = 5,
-        .task_stack_size = 2048,  //todo no clue what size it should be
-        .task_core_id = 1};
+        .task_stack_size = 2048,
+        .task_core_id = 1
+    };
     err = esp_event_loop_create(&loop_args, &state_loop_handle);
     if (err) return err;
 
@@ -525,23 +493,8 @@ esp_err_t WifiController::startListener() {
         }
         xEventGroupSetBits(_network_event_group, WIFI_DNS_IDLE_BIT);
     }
-/*     if (!_network_event_queue) {
-        _network_event_queue = xQueueCreate(32, sizeof(system_event_t *));
-        if (!_network_event_queue) {
-            log_e("Network Event Queue Create Failed!");
-            return ESP_ERR_INVALID_STATE;
-        }
-    } */
-/*     if (!_network_event_task_handle) {
-        xTaskCreateUniversal(_network_event_task, "network_event", 4096, NULL, ESP_TASKD_EVENT_PRIO - 1, &_network_event_task_handle, CONFIG_ARDUINO_EVENT_RUNNING_CORE);
-        if (!_network_event_task_handle) {
-            log_e("Network Event Task Start Failed!");
-            return ESP_ERR_INVALID_STATE;
-        }
-    } */
 
     esp_event_handler_instance_t instance_any_id;
-    //esp_event_handler_register_with(event_loop_handle, WIFI_EVENT, ESP_EVENT_ANY_ID, _network_event_cb, NULL);
     err = esp_event_handler_instance_register(WIFI_EVENT,
                                               ESP_EVENT_ANY_ID,
                                               &network_event_handler,
@@ -554,9 +507,8 @@ esp_err_t WifiController::startListener() {
                                               &network_event_handler,
                                               NULL,
                                               &instance_any_id);
-    
     if (err) return err;
-    return err; //esp_event_loop_init(&_network_event_cb, NULL);
+    return err;
 }
 
 void WifiController::state_event_handler(void *arg, esp_event_base_t base, int32_t id, void *event_data) {
@@ -564,23 +516,18 @@ void WifiController::state_event_handler(void *arg, esp_event_base_t base, int32
     transitions[id][state]();
 }
 
-//void WifiController::network_event_handler(void *arg, system_event_t *event) {
-void WifiController::network_event_handler(void* arg, esp_event_base_t base,
-                                   int32_t id, void* event_data)
-{
+void WifiController::network_event_handler(void* arg, esp_event_base_t base, int32_t id, void* event_data) {
     log_i("--- %u    %u", base, id);
 
-    if (base == WIFI_EVENT)
-    {
-        switch (id) 
-        {
+    if (base == WIFI_EVENT) {
+        switch (id) {
         case WIFI_EVENT_WIFI_READY:
             log_i("WiFi interface ready");
             break;
         case WIFI_EVENT_SCAN_DONE:
             log_i("Completed scan for access points");
             break;
-        case WIFI_EVENT_STA_START:            
+        case WIFI_EVENT_STA_START:
             log_i("WiFi client started");
             //todo is this needed
             esp_wifi_connect();
@@ -632,12 +579,9 @@ void WifiController::network_event_handler(void* arg, esp_event_base_t base,
             log_i("Unknown event");
             break;
         }
-    } else if (base == IP_EVENT)
-    {
-        switch (id) 
-        {
+    } else if (base == IP_EVENT) {
+        switch (id) {
             case IP_EVENT_STA_GOT_IP: {
-            //
             ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
             uint8_t *spa = (uint8_t *)&(event->ip_info.ip.addr);
             log_i("Obtained IP address: %u.%u.%u.%u", spa[0], spa[1], spa[2], spa[3]);
