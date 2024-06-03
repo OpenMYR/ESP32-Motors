@@ -14,9 +14,7 @@ void tearDown(void) {
 
 void test_wifi_init(void){
 
-    esp_err_t err;
-    err = WifiController::init();
-    TEST_ASSERT_TRUE(err == false);
+    TEST_ASSERT_EQUAL(ESP_OK, WifiController::init());
 }
 
 void setup()
