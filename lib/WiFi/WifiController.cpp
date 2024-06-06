@@ -108,7 +108,6 @@ esp_err_t WifiController::init() {
     apSsid = preferences.getString(MYR_WIFI_PREF_TAG_AP_SSID, myrSsid);
     apPass = preferences.getString(MYR_WIFI_PREF_TAG_AP_PASS, MYR_WIFI_DEFAULT_AP_PASS);
     preferences.end();
-
     initMode(targetMode);
     return err;
 }
@@ -256,7 +255,6 @@ esp_err_t WifiController::setDefaultApCredentials(const String *newSsid, const S
     err = saveValue(MYR_WIFI_PREF_TAG_AP_SSID, newSsid);
     if (err != ERR_OK) return err;
     err = saveValue(MYR_WIFI_PREF_TAG_AP_PASS, newPass);
-    
 
     return err;
 }
