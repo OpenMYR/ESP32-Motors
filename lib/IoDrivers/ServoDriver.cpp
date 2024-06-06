@@ -167,6 +167,9 @@ void IRAM_ATTR ServoDriver::isrIo(void *)
 
 bool ServoDriver::isMotorRunning(uint8_t motor_id)
 {
+    if (motor_id > MAX_MOTORS)
+        return false;
+    motor_id--;
     return !commandDone[motor_id];
 }
 
