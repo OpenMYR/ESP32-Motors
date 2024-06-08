@@ -25,6 +25,10 @@ public:
     void abortCommand(uint8_t motorID);
     static StepperDriver *IRAM_ATTR getInstance();
     void changeMotorSettings(MotorDriver::config_setting setting, uint32_t data1, uint32_t data2, uint8_t motorID);
+    static bool IRAM_ATTR  isEndstopTripped();
+    static esp_err_t setEndstopTrippedPinSetting(uint8_t setting);
+    static bool getEndstopTrippedPinSetting();
+
 
 private:
     void initMotorGpio();
@@ -37,7 +41,6 @@ private:
     TaskHandle_t motorTaskHandle;
     static void IRAM_ATTR endstop_a_interrupt();
     static void IRAM_ATTR endstop_b_interrupt();
-    static bool IRAM_ATTR  isEndstopTripped();
     static void setStepRate(int32_t rate);
     static void setSleep(boolean sleep);
     static void addSteps(uint32_t steps);
@@ -74,6 +77,7 @@ private:
     bool isValidOpCode(Op *);
     void getNextOpForDriver(uint8_t id);
     void peekOpForDriver(uint8_t id);
+    int motorsControlled;
 
 
 };

@@ -3,7 +3,6 @@
 #include "OpBuffer.h"
 #include <math.h>
 #include "ESP32PWM.h"
-#include "ESP32Servo.h"
 #include "esp32-hal-ledc.h"
 
 #include "driver/periph_ctrl.h"
@@ -25,7 +24,6 @@
 //static hw_timer_t *timerDriver = NULL;
 StepperDriver *StepperDriver::instance = NULL;
 //static CommandLayer *commandInstance = NULL;
-int motorsControlled = 0;
 static uint8_t peekTicks = 5;
 static uint8_t peekRate = 5;
 
@@ -54,7 +52,7 @@ uint32_t DRAM_ATTR paused = 0;
 uint32_t DRAM_ATTR command_done = 1;
 
 
-bool DRAM_ATTR const            isEndstopTrippedHigh        = false; // Value of endstop when it is engaged.
+bool DRAM_ATTR                  isEndstopTrippedHigh        = false; // Value of endstop when it is engaged.
 uint32_t DRAM_ATTR static       debounceTimeMs              = MYR_DEFAULT_DEBOUNCE_MS;    // millis // TODO: NVS config
 
 static DRAM_ATTR portMUX_TYPE   endstopAMux                 = portMUX_INITIALIZER_UNLOCKED;
@@ -495,6 +493,9 @@ void StepperDriver::pcnt_setup_init(uint8_t pin)
 
 bool StepperDriver::isMotorRunning(uint8_t motor_id)
 {
+    if (motor_id > motorsControlled)
+        return false;
+    motor_id--;
     return !commandDone[motor_id];
 }
 
@@ -569,6 +570,8 @@ void StepperDriver::changeMotorSettings(config_setting setting, uint32_t data1, 
 
 void StepperDriver::setStepRate(int32_t rate)
 {
+    #ifndef UNITY_INCLUDE_CONFIG_H // ESP32PWM attachPin causes Unit Tests to hang
+    
     if (abs(rate) != 0)
     {
         if (pwm.attached())
@@ -586,6 +589,7 @@ void StepperDriver::setStepRate(int32_t rate)
         pwm.detachPin(GPIO_STEP);
         digitalWrite(GPIO_STEP, LOW);
     }
+    #endif // !UNITTEST
 }
 
 void StepperDriver::setSleep(boolean sleep)
@@ -600,6 +604,26 @@ void StepperDriver::setSleep(boolean sleep)
         digitalWrite(GPIO_STEP_ENABLE, LOW);
     }
 
+}
+
+bool StepperDriver::getEndstopTrippedPinSetting()
+{
+    return isEndstopTrippedHigh;
+
+}
+
+esp_err_t StepperDriver::setEndstopTrippedPinSetting(uint8_t setting) 
+{
+    esp_err_t error = ESP_OK;
+    if (setting >= 0 && setting <= 1)
+    {
+        isEndstopTrippedHigh = static_cast<bool>(setting);
+        // TODO: Add endstop update logic?
+    } else {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    return error;
 }
 
 
