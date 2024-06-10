@@ -48,4 +48,4 @@ jobs:
 
       - name: Test
         run: |
-          test -e "esp32_test" 
+          platformio test -e "esp32_test" 
