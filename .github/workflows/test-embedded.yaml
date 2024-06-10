@@ -45,3 +45,7 @@ jobs:
       - name: Build
         run: |
           platformio run -e esp32
+
+      - name: Test
+        run: |
+          test -e "esp32_test" 
