@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <unity.h>
 
-#include <ETH.h>
+//#include <ETH.h>   // Breaks when project jumped to 6.7.0
 #include <WiFi.h>
 #include <WiFiAP.h>
 #include <WiFiClient.h>
