@@ -71,6 +71,7 @@ private:
     bool isValidOpCode(Op *);
     void getNextOpForDriver(uint8_t id);
     void peekOpForDriver(uint8_t id);
+    int motorsControlled;
 
 
 };

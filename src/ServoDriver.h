@@ -2,8 +2,7 @@
 #define _ServoDriver_H_
 
 #include "MotorDriver.h"
-#include <stdint.h>
-#include "ESP32Servo.h"
+#include <ESP32Servo.h>
 #include "Op.h"
 #include "CommandLayer.h"
 
