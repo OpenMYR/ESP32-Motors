@@ -5,7 +5,6 @@
 #endif
 
 #include <Arduino.h>
-#include <ETH.h>
 #include <WiFi.h>
 #include <WiFiAP.h>
 #include <WiFiClient.h>
