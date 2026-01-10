@@ -1,11 +1,12 @@
-#if __has_include("../../src/config/LocalConfig.h")
-#include "../../src/config/LocalConfig.h"
+#if __has_include("config/LocalConfig.h")
+#include "config/LocalConfig.h"
 #else
-#include "../../src/config/DefaultConfig.h"
+#include "config/DefaultConfig.h"
 #endif
 
-#include "WebServer.h"
 #include <SPIFFS.h>
+
+#include "WebServer.h"
 #include "CommandParser.h"
 
 #include "esp_log.h"

@@ -44,3 +44,4 @@
 # Local Project
 src/config/LocalConfig.h
 /package-lock.json
+include/config/LocalConfig.h

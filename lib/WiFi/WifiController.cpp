@@ -1,19 +1,20 @@
-#if __has_include("../../src/config/LocalConfig.h")
-#include "../../src/config/LocalConfig.h"
+#if __has_include("config/LocalConfig.h")
+#include "config/LocalConfig.h"
 #else
-#include "../../src/config/DefaultConfig.h"
+#include "config/DefaultConfig.h"
 #endif
 
-#include "WifiController.h"
-#include <FileIO.h>
 #include <esp_log.h>
 #include <MD5Builder.h>
 #include <ArduinoOTA.h>
-#include "lwip/netif.h"
-#include "freertos/queue.h"
+#include <Preferences.h>
+#include <lwip/netif.h>
+#include <freertos/queue.h>
+#include <esp_event.h>
+#include <esp_event_base.h>
 
-#include "esp_event.h"
-#include "esp_event_base.h"
+#include "WifiController.h"
+#include "FileIO.h"
 
 #define TAG "WifiController"
 
@@ -33,7 +34,7 @@ VoidFunction WifiController::transitions[5][5] = {
 
 String WifiController::myrSsid = "";
 int WifiController::attempts = 0;
-WifiController::myr_wifi_state_t WifiController::state;
+myr_wifi_state_t WifiController::state;
 
 Preferences WifiController::preferences;
 EventGroupHandle_t WifiController::_network_event_group = NULL;
@@ -108,6 +109,7 @@ esp_err_t WifiController::init() {
     apSsid = preferences.getString(MYR_WIFI_PREF_TAG_AP_SSID, myrSsid);
     apPass = preferences.getString(MYR_WIFI_PREF_TAG_AP_PASS, MYR_WIFI_DEFAULT_AP_PASS);
     preferences.end();
+
     initMode(targetMode);
     return err;
 }
@@ -309,7 +311,8 @@ void WifiController::stateTimerCallback(TimerHandle_t pxTimer) {
 
 void WifiController::ipMessageTask(void *param) {
     for(;;) {
-        //WebSocket::sendMessage(ip);
+        // todo: why is this comment out
+        //WebSocket::sendMessage(ip);  // TODO : Format as message object info
         vTaskSuspend(NULL);
     }
     vTaskDelete(NULL);
@@ -423,14 +426,14 @@ void WifiController::generateSsid() {
     myrSsid += md5_out;
 }
 
-WifiController::myr_wifi_state_t WifiController::getWiFiState() {
+myr_wifi_state_t WifiController::getWiFiState() {
     return state;
 }
 
 esp_err_t WifiController::startTCP() {
     esp_err_t err = esp_netif_init();
     if (err) return err;
-    
+
     esp_netif_ip_info_t info;
     info.ip.addr = static_cast<uint32_t>(localIP);
     info.gw.addr = static_cast<uint32_t>(gateway);
@@ -519,7 +522,7 @@ void WifiController::state_event_handler(void *arg, esp_event_base_t base, int32
 }
 
 void WifiController::network_event_handler(void* arg, esp_event_base_t base, int32_t id, void* event_data) {
-    log_i("--- %u    %u", base, id);
+    log_d("--- %u    %u", base, id);
 
     if (base == WIFI_EVENT) {
         switch (id) {

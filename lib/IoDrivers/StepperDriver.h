@@ -6,8 +6,9 @@
  * @brief Declaration of the stepper motor driver singleton.
  */
 
-#include "MotorDriver.h"
 #include <stdint.h>
+
+#include "MotorDriver.h"
 #include "Op.h"
 #include "CommandLayer.h"
 
@@ -97,7 +98,7 @@ private:
     static uint16_t getMicroStepRate();
     static void setMicroStepRate(uint16_t microstepRate);
     static void setMicroStepRate(bool MS1, bool MS2, bool MS3);
-    void checkLocation();
+        void checkLocation();
 
     static void pcnt_setup_init(uint8_t pin);
     static void IRAM_ATTR pcnt_intr_handler(void *arg);
@@ -127,8 +128,6 @@ private:
     void getNextOpForDriver(uint8_t id);
     void peekOpForDriver(uint8_t id);
     int motorsControlled;
-
-
 };
 
 #endif /* _ServoDriver_H_ */

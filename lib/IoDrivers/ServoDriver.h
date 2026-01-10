@@ -6,8 +6,9 @@
  * @brief Declaration of the servo motor driver singleton.
  */
 
-#include "MotorDriver.h"
 #include <ESP32Servo.h>
+
+#include "MotorDriver.h"
 #include "Op.h"
 #include "CommandLayer.h"
 

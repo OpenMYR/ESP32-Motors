@@ -2,8 +2,10 @@
  * @file ServoDriver.cpp
  * @brief Implements the servo motor driver singleton logic.
  */
-#include "ServoDriver.h"
+
 #include <reent.h>
+
+#include "ServoDriver.h"
 #include "OpBuffer.h"
 
 #define CORE_1 1
@@ -67,7 +69,7 @@ void ServoDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID)
     if (motorID > MAX_MOTORS)
         return;
     motorID--; //motors are 1-15, we want 0-14
-    
+
     if(motorSleeping[motorID]){
         motorSleeping[motorID] = false;
         servo[motorID].attach(servoPin[motorID]);
@@ -97,7 +99,7 @@ void ServoDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorID)
     if (rate == 0)
         return;
     motorID--; //motors are 1-15, we want 0-14
-    
+
     if(motorSleeping[motorID]){
         motorSleeping[motorID] = false;
         servo[motorID].attach(servoPin[motorID]);
@@ -127,7 +129,7 @@ void ServoDriver::motorStop(signed int wait_time, unsigned short precision, uint
     if (motorID > MAX_MOTORS)
         return;
     motorID--;
-    
+
     if(motorSleeping[motorID]){
         motorSleeping[motorID] = false;
         servo[motorID].attach(servoPin[motorID]);
@@ -183,7 +185,7 @@ void ServoDriver::abortCommand(uint8_t motorID)
  */
 void ServoDriver::isrStartIoDriver()
 {
-
+    
     xTaskCreatePinnedToCore(
         isrIo,
         "motorloop",
