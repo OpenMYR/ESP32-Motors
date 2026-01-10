@@ -1,7 +1,8 @@
-#ifndef _CommandLayer_H_
-#define _CommandLayer_H_
+#ifndef MYR_COMMANDLAYER_H
+#define MYR_COMMANDLAYER_H
 
 #include <stdint.h>
+
 #include "MotorDriver.h"
 #include "OpBuffer.h"
 
@@ -35,4 +36,4 @@ struct motor_public_to_driver_id_map
     uint16_t driverId;
     MotorDriver *driver;
 };
-#endif /* _CommandLayer_H_ */
+#endif // MYR_COMMANDLAYER_H

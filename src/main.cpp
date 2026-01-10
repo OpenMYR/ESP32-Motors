@@ -17,6 +17,10 @@
 #include <WiFiType.h>
 #include <WiFiUdp.h>
 #include <AsyncTCP.h>
+#include <esp_log.h>
+#include <ESPmDNS.h>
+#include <ArduinoOTA.h>
+
 #include "FileIO.h"
 #include "WifiController.h"
 #include "WebServer.h"
@@ -24,9 +28,6 @@
 #include "ServoDriver.h"
 #include "CommandLayer.h"
 #include "OpBuffer.h"
-#include <esp_log.h>
-#include <ESPmDNS.h>
-#include <ArduinoOTA.h>
 
 #if (SERVO + STEPPER + BDC) > 1
 #error "Too many device types enabled"

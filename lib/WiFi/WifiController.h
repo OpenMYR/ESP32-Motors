@@ -1,12 +1,12 @@
-#ifndef _WIFICONTROLLER_H_
-#define _WIFICONTROLLER_H_
+#ifndef MYR_WIFICONTROLLER_H
+#define MYR_WIFICONTROLLER_H
 
 #include <WString.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include <Preferences.h>
 extern "C" {
-#include "esp_netif.h"
+#include <esp_netif.h>
 }
 
 typedef void (*VoidFunction) ();
@@ -105,4 +105,4 @@ class WifiController {
         static esp_netif_t *sta_netif;
 };
 
-#endif /* _WIFICONTROLLER_H_ */
+#endif // MYR_WIFICONTROLLER_H

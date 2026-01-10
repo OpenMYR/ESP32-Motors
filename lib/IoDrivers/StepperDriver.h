@@ -1,5 +1,5 @@
-#ifndef _StepperDriver_H_
-#define _StepperDriver_H_
+#ifndef MYR_STEPPERDRIVER_H
+#define MYR_STEPPERDRIVER_H
 
 /**
  * @file StepperDriver.h
@@ -130,4 +130,4 @@ private:
     int motorsControlled;
 };
 
-#endif /* _ServoDriver_H_ */
+#endif // MYR_STEPPERDRIVER_H

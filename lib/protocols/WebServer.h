@@ -1,5 +1,6 @@
-#ifndef _WebServer_H_
-#define _WebServer_H_
+#ifndef MYR_WEBSERVER_H
+#define MYR_WEBSERVER_H
+
 #include <ESPAsyncWebServer.h>
 
 class WebServer {
@@ -9,4 +10,4 @@ class WebServer {
     private:  
 };
 
-#endif /* _WebServer_H_ */
+#endif // MYR_WEBSERVER_H

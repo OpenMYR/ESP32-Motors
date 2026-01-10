@@ -1,5 +1,5 @@
-#ifndef _MotorDriver_H_
-#define _MotorDriver_H_
+#ifndef MYR_MOTORDRIVER_H
+#define MYR_MOTORDRIVER_H
 
 /**
  * @file MotorDriver.h
@@ -118,4 +118,8 @@ class MotorDriver
 
 };
 
+<<<<<<< Updated upstream
 #endif /* _MotorDriver_H_ */
+=======
+#endif // MYR_MOTORDRIVER_H
+>>>>>>> Stashed changes

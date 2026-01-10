@@ -1,5 +1,6 @@
+#include <esp_log.h>
+
 #include "OpBuffer.h"
-#include "esp_log.h"
 
 OpBuffer *OpBuffer::instance = NULL;
 SemaphoreHandle_t xMutex = NULL;

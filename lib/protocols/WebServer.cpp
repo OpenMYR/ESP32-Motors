@@ -5,11 +5,10 @@
 #endif
 
 #include <SPIFFS.h>
+#include <esp_log.h>
 
 #include "WebServer.h"
 #include "CommandParser.h"
-
-#include "esp_log.h"
 String const TAG = "WebServer";
 
 AsyncWebServer server(80);

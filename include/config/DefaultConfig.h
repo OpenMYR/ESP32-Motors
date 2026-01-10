@@ -1,8 +1,8 @@
-#ifndef _DefaultConfig_H_ //Comment me out in LocalConfig
-#define _DefailtConfig_H_ //Comment me out in LocalConfig
+#ifndef MYR_DefaultConfig_H_ //Comment me out in LocalConfig
+#define MYR_DefailtConfig_H_ //Comment me out in LocalConfig
 
-// #ifndef _LocalConfig_H_ //Uncomment me in LocalConfig
-// #define _LocalConfig_H_ //Uncomment me in LocalConfig
+// #ifndef MYR_LocalConfig_H_ //Uncomment me in LocalConfig
+// #define MYR_LocalConfig_H_ //Uncomment me in LocalConfig
 
 #include <WString.h>
 #include <string.h>
@@ -31,7 +31,7 @@
 const String MYR_DEVICE_DEFAULT_NAME = "Motor";
 
 /* #region Wifi Config */ 
-#define MYR_WIFI_MODE_AP            000001
+#define MYR_WIFI_MODE_AP            0x0001
 #define MYR_WIFI_MODE_STATION       0x0002
 #define MYR_WIFI_MODE_AP_STATION    0x0004
 
@@ -53,6 +53,5 @@ const String MYR_WIFI_DEFAULT_STATION_PASS = "pass";
 #define MYR_WIFI_STATION_RETRIES 10 // How many times should the devce attempt to connect to a network before putting up an AP
 #define MYR_WIFI_STA_RETRY_INTERVAL 1000 // Time in ms between attempts
 #define MYR_WIFI_STA_RETRY_INTERVAL_LONG 15000 // Time in ms between attempts, after the AP is up
-
 
 #endif

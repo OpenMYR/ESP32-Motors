@@ -1,5 +1,8 @@
-#ifndef _BrushedMotorDriver_H_
-#define _BrushedMotorDriver_H_
+#ifndef MYR_BRUSHEDMOTORDRIVER_H
+#define MYR_BRUSHEDMOTORDRIVER_H
+
+#include <stdint.h>
+#include <ESP32PWM.h>
 
 /**
  * @file BrushedMotorDriver.h
@@ -7,10 +10,8 @@
  */
 
 #include "MotorDriver.h"
-#include <stdint.h>
 #include "Op.h"
 #include "CommandLayer.h"
-#include "ESP32PWM.h"
 
 #define MAX_BrushedMotor_MOTORS 3
 
@@ -135,4 +136,4 @@ private:
     void peekOpForDriver(uint8_t id);
 };
 
-#endif /* _ServoDriver_H_ */
+#endif // MYR_BRUSHEDMOTORDRIVER_H

@@ -1,5 +1,5 @@
-#ifndef _OpBuffer_H_
-#define _OpBuffer_H_
+#ifndef MYR_OPBUFFER_H
+#define MYR_OPBUFFER_H
 
 #include <ESPAsyncWebServer.h>
 
@@ -32,4 +32,4 @@ private:
     bool validIndex(uint8_t);
 };
 
-#endif /* _OpBuffer_H_ */
+#endif // MYR_OPBUFFER_H

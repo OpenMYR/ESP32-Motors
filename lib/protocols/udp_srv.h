@@ -1,8 +1,9 @@
-#ifndef _udp_srv_H_
-#define _udp_srv_H_
+#ifndef MYR_UDP_SRV_H
+#define MYR_UDP_SRV_H
 
 #include <Arduino.h>
 #include <AsyncUDP.h>
+
 #include "CommandParser.h"
 #include "Op.h"
 
@@ -24,4 +25,4 @@ class udp_srv
         AsyncUDP udp;
 };
 
-#endif
+#endif // MYR_UDP_SRV_H

@@ -1,5 +1,5 @@
-#ifndef Op_H_
-#define Op_H_
+#ifndef MYR_OP_H
+#define MYR_OP_H
 
 #include <IPAddress.h>
 
@@ -51,4 +51,4 @@ struct wifi_command_packet {
 	char password[63];
 };
 
-#endif /* Op_H_ */
+#endif // MYR_OP_H

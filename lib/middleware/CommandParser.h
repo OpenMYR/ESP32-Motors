@@ -1,9 +1,10 @@
-#ifndef _CommandParser_H_
-#define _CommandParser_H_
+#ifndef MYR_COMMANDPARSER_H
+#define MYR_COMMANDPARSER_H
 
 #include <functional>
 #include <ArduinoJson.h>
 #include <IPAddress.h>
+
 #include "Op.h"
 
 class CommandParser
@@ -25,4 +26,4 @@ private:
     static std::function<void(command_response_packet&)> ack_func;
 };
 
-#endif /* _CommandParser_H_ */
+#endif // MYR_COMMANDPARSER_H

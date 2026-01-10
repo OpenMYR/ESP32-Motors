@@ -2,21 +2,21 @@
  * @file BrushedMotorDriver.cpp
  * @brief Implements the singleton for controlling brushed motor bridges.
  */
-#include "BrushedMotorDriver.h"
 #include <reent.h>
-#include "OpBuffer.h"
 #include <math.h>
-#include "ESP32PWM.h"
-#include "ESP32Servo.h"
-#include "esp32-hal-ledc.h"
+#include <ESP32PWM.h>
+#include <ESP32Servo.h>
+#include <esp32-hal-ledc.h>
+#include <driver/periph_ctrl.h>
+#include <driver/ledc.h>
+#include <driver/gpio.h>
+#include <driver/pcnt.h>
+#include <esp_attr.h>
+#include <esp_log.h>
+#include <soc/gpio_sig_map.h>
 
-#include "driver/periph_ctrl.h"
-#include "driver/ledc.h"
-#include "driver/gpio.h"
-#include "driver/pcnt.h"
-#include "esp_attr.h"
-#include "esp_log.h"
-#include "soc/gpio_sig_map.h"
+#include "BrushedMotorDriver.h"
+#include "OpBuffer.h"
 
 #define CORE_1 1
 #define UPDATE_FREQ 1000

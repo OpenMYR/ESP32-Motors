@@ -1,9 +1,9 @@
-#ifndef _FileIO_H_
-#define _FileIO_H_
+#ifndef MYR_FILEIO_H
+#define MYR_FILEIO_H
 
 class FileIO {
     public:
         static bool init();
 };
 
-#endif /* _FileIO_H_ */
+#endif // MYR_FILEIO_H

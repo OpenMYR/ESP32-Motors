@@ -1,5 +1,5 @@
-#ifndef _ServoDriver_H_
-#define _ServoDriver_H_
+#ifndef MYR_SERVODRIVER_H
+#define MYR_SERVODRIVER_H
 
 /**
  * @file ServoDriver.h
@@ -128,4 +128,4 @@ private:
     void peekOpForDriver(uint8_t id);
 };
 
-#endif /* _ServoDriver_H_ */
+#endif // MYR_SERVODRIVER_H
