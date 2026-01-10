@@ -13,26 +13,28 @@ typedef void (*VoidFunction) ();
 
 ESP_EVENT_DECLARE_BASE(MYR_WIFI_EVENT_BASE);
 
-/* Definitions state events */
-typedef enum {
-    MYR_WIFI_EVENT_CONN_NEW_STA             = 0,       /*!< Connection request to a new AP */
-    MYR_WIFI_EVENT_DISCONNECT               = 1,       /*!< Disconnect request from current AP */
-    MYR_WIFI_EVENT_CONNECTED                = 2,       /*!< Successfully connected to a new AP */
-    MYR_WIFI_EVENT_CONNECTION_FAILED        = 3,       /*!< A connection has been lost or failed to establish */
-    MYR_WIFI_EVENT_TIMER                    = 4        /*!< A time has passed */
-} myr_wifi_event_t;
-
-/* Definitions for states */
-typedef enum {
-    MYR_WIFI_STATE_AP                       = 0,       /*!< AP has started */
-    MYR_WIFI_STATE_STA                      = 1,       /*!< Device has connected to an ap */
-    MYR_WIFI_STATE_STA_CONNECTING           = 2,       /*!< Device is trying to connect to an ap */
-    MYR_WIFI_STATE_AP_STA_CONNECTING        = 3,       /*!<  */
-    MYR_WIFI_STATE_AP_STA_RAMPDOWN          = 4        /*!<  */
-} myr_wifi_state_t;
 
 class WifiController {
     public:
+
+        /* Definitions state events */
+        typedef enum {
+            MYR_WIFI_EVENT_CONN_NEW_STA             = 0,       /*!< Connection request to a new AP */
+            MYR_WIFI_EVENT_DISCONNECT               = 1,       /*!< Disconnect request from current AP */
+            MYR_WIFI_EVENT_CONNECTED                = 2,       /*!< Successfully connected to a new AP */
+            MYR_WIFI_EVENT_CONNECTION_FAILED        = 3,       /*!< A connection has been lost or failed to establish */
+            MYR_WIFI_EVENT_TIMER                    = 4        /*!< A time has passed */
+        } myr_wifi_event_t;
+
+        /* Definitions for states */
+        typedef enum {
+            MYR_WIFI_STATE_AP                       = 0,       /*!< AP has started */
+            MYR_WIFI_STATE_STA                      = 1,       /*!< Device has connected to an ap */
+            MYR_WIFI_STATE_STA_CONNECTING           = 2,       /*!< Device is trying to connect to an ap */
+            MYR_WIFI_STATE_AP_STA_CONNECTING        = 3,       /*!<  */
+            MYR_WIFI_STATE_AP_STA_RAMPDOWN          = 4        /*!<  */
+        } myr_wifi_state_t;
+
         static esp_err_t init();
         static void fireWifiEvent(myr_wifi_event_t event, void *data);
         static void network_event_handler(void *arg, esp_event_base_t base, int32_t id, void* event_data);

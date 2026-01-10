@@ -34,7 +34,7 @@ VoidFunction WifiController::transitions[5][5] = {
 
 String WifiController::myrSsid = "";
 int WifiController::attempts = 0;
-myr_wifi_state_t WifiController::state;
+WifiController::myr_wifi_state_t WifiController::state;
 
 Preferences WifiController::preferences;
 EventGroupHandle_t WifiController::_network_event_group = NULL;
@@ -426,7 +426,7 @@ void WifiController::generateSsid() {
     myrSsid += md5_out;
 }
 
-myr_wifi_state_t WifiController::getWiFiState() {
+WifiController::myr_wifi_state_t WifiController::getWiFiState() {
     return state;
 }
 
