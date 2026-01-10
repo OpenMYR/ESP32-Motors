@@ -160,7 +160,15 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
         startAngle[motorID] = currentAngle[motorID];
         commandDeltaAngle[motorID] = targetAngle;
         startTime[motorID] = esp_timer_get_time();
-        commandDeltaTime[motorID] = startTime[motorID] + 1000000 * 30; //(uint64_t)(commandDeltaAngle[motorID] / ((double)rate / 1000000.0)) + 100;
+        if (rate > 0)
+        {
+            uint64_t duration_us = (uint64_t)(fabs(commandDeltaAngle[motorID]) * 1000000.0 / (double)rate);
+            commandDeltaTime[motorID] = startTime[motorID] + duration_us + 100; // small safety margin
+        }
+        else
+        {
+            commandDeltaTime[motorID] = UINT64_MAX; // no timeout if rate is zero/invalid
+        }
         commandDone[motorID] = false;
 
         setStepRate(rate);
@@ -200,7 +208,15 @@ void StepperDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorI
         startAngle[motorID] = currentAngle[motorID];
         commandDeltaAngle[motorID] = targetAngle + currentAngle[motorID];
         startTime[motorID] = esp_timer_get_time();
-        commandDeltaTime[motorID] = startTime[motorID] + 1000000 * 30; //(uint64_t)(commandDeltaAngle[motorID] / ((double)rate / 1000000.0)) + 100;
+        if (rate > 0)
+        {
+            uint64_t duration_us = (uint64_t)(fabs(commandDeltaAngle[motorID]) * 1000000.0 / (double)rate);
+            commandDeltaTime[motorID] = startTime[motorID] + duration_us + 100; // small safety margin
+        }
+        else
+        {
+            commandDeltaTime[motorID] = UINT64_MAX; // no timeout if rate is zero/invalid
+        }
         commandDone[motorID] = false;
 
         setStepRate(rate);
@@ -228,7 +244,7 @@ void StepperDriver::motorStop(signed int wait_time, unsigned short precision, ui
 
     motorDwell = true;
     startTime[0] = esp_timer_get_time();
-    commandDeltaTime[motorID] = startTime[0] + (abs(wait_time) * precision);
+    commandDeltaTime[motorID] = startTime[0] + (uint64_t)abs(wait_time) * (uint64_t)precision;
     commandDone[motorID] = false;
     
     if(motorSleeping){
