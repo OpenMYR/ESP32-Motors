@@ -118,8 +118,4 @@ class MotorDriver
 
 };
 
-<<<<<<< Updated upstream
-#endif /* _MotorDriver_H_ */
-=======
 #endif // MYR_MOTORDRIVER_H
->>>>>>> Stashed changes
