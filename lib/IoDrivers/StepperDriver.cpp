@@ -1,19 +1,19 @@
-#include "StepperDriver.h"
 #include <reent.h>
-#include "OpBuffer.h"
 #include <math.h>
-#include "ESP32PWM.h"
-#include "esp32-hal-ledc.h"
-
-#include "driver/periph_ctrl.h"
-#include "driver/ledc.h"
+#include <ESP32PWM.h>
+#include <esp32-hal-ledc.h>
+#include <driver/periph_ctrl.h>
+#include <driver/ledc.h>
+#include <driver/gpio.h>
+#include <driver/pcnt.h>
+#include <esp_attr.h>
+#include <esp_log.h>
+#include <soc/gpio_sig_map.h>
 #include <soc/pcnt_struct.h>
 #include <soc/pcnt_reg.h>
-#include "driver/gpio.h"
-#include "driver/pcnt.h"
-#include "esp_attr.h"
-#include "esp_log.h"
-#include "soc/gpio_sig_map.h"
+
+#include "StepperDriver.h"
+#include "OpBuffer.h"
 
 #define CORE_1 1
 #define UPDATE_FREQ 1000
@@ -78,12 +78,6 @@ StepperDriver::StepperDriver() : MotorDriver()
     Serial.write("StepperDriver const\n");
     initMotorGpio();
     memset(commandDone, 1, MAX_STEPPER_MOTORS);
-    /* commandDone[0] = 0;
-    startTime[0] = esp_timer_get_time();
-    commandDeltaTime[0] = 10000000;
-    startAngle[0] = 0;
-    commandDeltaAngle[0] = 360; */
-    //servo.attach(GPIO_STEP);
 }
 
 StepperDriver *IRAM_ATTR StepperDriver::getInstance()
@@ -147,7 +141,7 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
         direction = positiveDirection;
     }
     digitalWrite(GPIO_STEP_DIR, direction);
-    
+
     if(motorSleeping){
         motorSleeping = false;
         setSleep(motorSleeping);
@@ -159,7 +153,7 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
     {
         startAngle[motorID] = currentAngle[motorID];
         commandDeltaAngle[motorID] = targetAngle;
-        startTime[motorID] = esp_timer_get_time();
+        startTime[motorID] = (uint64_t) esp_timer_get_time();
         commandDeltaTime[motorID] = startTime[motorID] + 1000000 * 30; //(uint64_t)(commandDeltaAngle[motorID] / ((double)rate / 1000000.0)) + 100;
         commandDone[motorID] = false;
 
@@ -187,7 +181,7 @@ void StepperDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorI
     uint32_t limit = abs(targetAngle);
     direction = targetAngle > 0 ? positiveDirection : !positiveDirection;
     digitalWrite(GPIO_STEP_DIR, direction);
-    
+	    
     if(motorSleeping){
         motorSleeping = false;
         setSleep(motorSleeping);
@@ -199,7 +193,7 @@ void StepperDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorI
     {
         startAngle[motorID] = currentAngle[motorID];
         commandDeltaAngle[motorID] = targetAngle + currentAngle[motorID];
-        startTime[motorID] = esp_timer_get_time();
+        startTime[motorID] = (uint64_t) esp_timer_get_time();
         commandDeltaTime[motorID] = startTime[motorID] + 1000000 * 30; //(uint64_t)(commandDeltaAngle[motorID] / ((double)rate / 1000000.0)) + 100;
         commandDone[motorID] = false;
 
@@ -227,15 +221,15 @@ void StepperDriver::motorStop(signed int wait_time, unsigned short precision, ui
     }
 
     motorDwell = true;
-    startTime[0] = esp_timer_get_time();
-    commandDeltaTime[motorID] = startTime[0] + (abs(wait_time) * precision);
+    startTime[motorID] = (uint64_t) esp_timer_get_time();
+    commandDeltaTime[motorID] = startTime[motorID] + (abs(wait_time) * precision);
     commandDone[motorID] = false;
     
     if(motorSleeping){
         motorSleeping = false;
         setSleep(motorSleeping);
     }
-
+	
     setStepRate(0);
 
     log_d("command %d %d %d %d ", startAngle[motorID], commandDeltaAngle[motorID], startTime[motorID], commandDeltaTime[motorID]);
@@ -261,6 +255,7 @@ void StepperDriver::motorSleep(signed int wait_time, unsigned short precision, u
 
     setSleep(true);
     motorSleeping = true;
+    setSleep(motorSleeping);
 
     log_d("command %d %d %d %d ", startAngle[motorID], commandDeltaAngle[motorID], startTime[motorID], commandDeltaTime[motorID]);
 }
@@ -570,13 +565,14 @@ void StepperDriver::changeMotorSettings(config_setting setting, uint32_t data1, 
 
 void StepperDriver::setStepRate(int32_t rate)
 {
+    // todo document this bug
     #ifndef UNITY_INCLUDE_CONFIG_H // ESP32PWM attachPin causes Unit Tests to hang
     
     if (abs(rate) != 0)
     {
         if (pwm.attached())
         {
-            pwm.adjustFrequency(GPIO_STEP, 0.5);
+            pwm.adjustFrequency(rate, 0.5);
         }
         else
         {

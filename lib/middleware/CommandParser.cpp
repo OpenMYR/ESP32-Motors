@@ -1,17 +1,17 @@
-#if __has_include("../../src/config/LocalConfig.h")
-#include "../../src/config/LocalConfig.h"
+#if __has_include("config/LocalConfig.h")
+#include "config/LocalConfig.h"
 #else
-#include "../../src/config/DefaultConfig.h"
+#include "config/DefaultConfig.h"
 #endif
+
+#include <esp_log.h>
 
 #include "CommandParser.h"
 #include "OpBuffer.h"
 #include "Op.h"
 #include "WifiController.h"
 #include "CommandLayer.h"
-#include "esp_log.h"
 
-#include "esp_log.h"
 String const TAG = "CommandParser";
 
 StaticJsonDocument<2000> doc;
@@ -76,7 +76,7 @@ bool CommandParser::json_parseCommands(String jsonString, IPAddress ip)
         log_e("deserializeJson() failed: %s", error.c_str());
         return return202Required;
     }
-
+    
     JsonArray commandArray = doc["commands"];
     if (commandArray.isNull())
     {
