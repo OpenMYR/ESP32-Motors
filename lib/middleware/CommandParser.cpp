@@ -160,7 +160,7 @@ void CommandParser::parseConfig(JsonObject *cmd, char code)
         ESP_ERROR_CHECK_WITHOUT_ABORT(err);
     }
     else if(code == 'D') {
-        WifiController::fireWifiEvent(WifiController::MYR_WIFI_EVENT_DISCONNECT, NULL);
+        WifiController::fireWifiEvent(MYR_WIFI_EVENT_DISCONNECT, NULL);
         err = WifiController::setDefaultMode(MYR_WIFI_MODE_AP);
         ESP_ERROR_CHECK_WITHOUT_ABORT(err);
     } else if(code == 'O') WifiController::changeOTAPass(&ssid, &pass);
