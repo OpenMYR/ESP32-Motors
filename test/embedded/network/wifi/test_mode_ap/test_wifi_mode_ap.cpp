@@ -3,7 +3,7 @@
 
 #include "WifiController.h"
 #include <Preferences.h>
-#include "../../src/config/DefaultConfig.h"
+#include "config/DefaultConfig.h"
 
 static Preferences preferences;
 
