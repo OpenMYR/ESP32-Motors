@@ -1,6 +1,11 @@
 #ifndef _BrushedMotorDriver_H_
 #define _BrushedMotorDriver_H_
 
+/**
+ * @file BrushedMotorDriver.h
+ * @brief Declaration of the brushed motor driver singleton interface.
+ */
+
 #include "MotorDriver.h"
 #include <stdint.h>
 #include "Op.h"
@@ -9,27 +14,79 @@
 
 #define MAX_BrushedMotor_MOTORS 3
 
+/**
+ * @brief Driver implementation for controlling brushed DC motors via PWM.
+ */
 class BrushedMotorDriver : public MotorDriver
 {
 public:
+    /**
+     * @brief Create the brushed motor driver singleton and prepare GPIOs.
+     */
     BrushedMotorDriver();
 
+    /**
+     * @brief Report whether a motor still has work queued.
+     * @param motor_id Zero-based motor index.
+     * @return True when the motor is active.
+     */
     bool isMotorRunning(uint8_t motor_id);
 
+    /**
+     * @brief Launch the driver FreeRTOS task on CORE_1.
+     */
     void isrStartIoDriver();
+    
+    /**
+     * @brief Shutdown the driver task and disable outputs.
+     */
     void isrStopIoDriver();
 
+    /**
+     * @brief Command a direction/speed target for a specific motor.
+     */
     void motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID);
+
+    /**
+     * @brief Alias for motorGoTo that follows the MotorDriver interface.
+     */
     void motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorID);
+
+    /**
+     * @brief Pause a motor for a fixed duration then release.
+     */
     void motorStop(int32_t wait_time, uint16_t precision, uint8_t motorID);
+
+    /**
+     * @brief Immediately halt the motor by cutting PWM.
+     */
     void abortCommand(uint8_t motorID);
+
+    /**
+     * @brief Return the singleton BrushedMotorDriver instance.
+     * @return Global driver pointer.
+     */
     static BrushedMotorDriver *IRAM_ATTR getInstance();
+
+    /**
+     * @brief Apply driver configuration changes (UI placeholder).
+     */
     void changeMotorSettings(MotorDriver::config_setting setting, uint32_t data1, uint32_t data2, uint8_t motorID);
 
 private:
+    /**
+     * @brief Configure the GPIOs needed by the H-bridge and endstops.
+     */
     void initMotorGpio();
 
+    /**
+     * @brief Task entry that initializes PWM and calls driver().
+     */
     static void IRAM_ATTR isrIoBDC(void *);
+
+    /**
+     * @brief Driver loop that polls for commands and manages dwell times.
+     */
     void IRAM_ATTR driver();
 
     static BrushedMotorDriver *instance;
@@ -66,6 +123,11 @@ private:
     ESP32PWM bdcPWM1;
     ESP32PWM bdcPWM2;
 
+    /**
+     * @brief Program the PWM duty cycle and direction outputs.
+     * @param power Duty cycle in 0..255.
+     * @param direction Direction flag (1 forward, 0 reverse).
+     */
     static void setSpeed(uint8_t power, int8_t direction);
 
     bool isValidOpCode(Op *);

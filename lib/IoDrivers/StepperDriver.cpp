@@ -1,3 +1,7 @@
+/**
+ * @file StepperDriver.cpp
+ * @brief Implements the singleton stepper motor driver.
+ */
 #include "StepperDriver.h"
 #include <reent.h>
 #include "OpBuffer.h"
@@ -73,19 +77,20 @@ int32_t DRAM_ATTR location = 0;
 ESP32PWM pwm;
 pcnt_isr_handle_t user_isr_handle = NULL; //user's ISR service handle
 
+/**
+ * @brief Construct the stepper driver, initialize GPIO, and reset the pending command state.
+ */
 StepperDriver::StepperDriver() : MotorDriver()
 {
     Serial.write("StepperDriver const\n");
     initMotorGpio();
     memset(commandDone, 1, MAX_STEPPER_MOTORS);
-    /* commandDone[0] = 0;
-    startTime[0] = esp_timer_get_time();
-    commandDeltaTime[0] = 10000000;
-    startAngle[0] = 0;
-    commandDeltaAngle[0] = 360; */
-    //servo.attach(GPIO_STEP);
 }
 
+/**
+ * @brief Return the singleton StepperDriver instance, creating it if necessary.
+ * @return Pointer to the global StepperDriver.
+ */
 StepperDriver *IRAM_ATTR StepperDriver::getInstance()
 {
     if (instance == NULL)
@@ -96,6 +101,9 @@ StepperDriver *IRAM_ATTR StepperDriver::getInstance()
     return instance;
 }
 
+/**
+ * @brief Configure the GPIO pins for the stepper interface and attach endstop interrupts.
+ */
 void StepperDriver::initMotorGpio()
 {
     motorsControlled = 1;
@@ -122,6 +130,12 @@ void StepperDriver::initMotorGpio()
     endstop_b_interrupt();
 }
 
+/**
+ * @brief Move a motor to an absolute angle at the requested rate, scheduling the required timeout.
+ * @param targetAngle Absolute position goal in encoder units.
+ * @param rate Requested speed for the motion.
+ * @param motorID 1-based ID of the motor to command.
+ */
 void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID)
 {
     //double goToDegrees = (double)targetAngle;
@@ -181,6 +195,12 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
     log_d("command: motorGoTo %d %d %d %d ", startAngle[motorID], commandDeltaAngle[motorID], startTime[motorID], commandDeltaTime[motorID]);
 }
 
+/**
+ * @brief Shift a motor by a relative angle from its current position using the target rate.
+ * @param targetAngle Angle delta to apply to the motor.
+ * @param rate Requested speed for the motion.
+ * @param motorID 1-based ID of the motor to command.
+ */
 void StepperDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorID)
 {
     if (motorID > motorsControlled)
@@ -229,6 +249,12 @@ void StepperDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorI
     log_d("command: motorMove %d %d %d %d ", startAngle[motorID], commandDeltaAngle[motorID], startTime[motorID], commandDeltaTime[motorID]);
 }
 
+/**
+ * @brief Hold the motor in place for a number of wait cycles before resuming.
+ * @param wait_time Number of cycles to wait.
+ * @param precision Duration of each wait cycle in milliseconds.
+ * @param motorID 1-based ID of the motor to command.
+ */
 void StepperDriver::motorStop(signed int wait_time, unsigned short precision, uint8_t motorID)
 {
     // wait_time, cycles to wait
@@ -257,6 +283,12 @@ void StepperDriver::motorStop(signed int wait_time, unsigned short precision, ui
     log_d("command %d %d %d %d ", startAngle[motorID], commandDeltaAngle[motorID], startTime[motorID], commandDeltaTime[motorID]);
 }
 
+/**
+ * @brief Hold the motor, then transition the driver into sleep mode after the wait period.
+ * @param wait_time Number of cycles to wait.
+ * @param precision Duration of each wait cycle in milliseconds.
+ * @param motorID 1-based ID of the motor to command.
+ */
 void StepperDriver::motorSleep(signed int wait_time, unsigned short precision, uint8_t motorID)
 {
     // wait_time, cycles to wait
@@ -281,6 +313,10 @@ void StepperDriver::motorSleep(signed int wait_time, unsigned short precision, u
     log_d("command %d %d %d %d ", startAngle[motorID], commandDeltaAngle[motorID], startTime[motorID], commandDeltaTime[motorID]);
 }
 
+/**
+ * @brief Immediately disable the step output and mark the command as completed.
+ * @param motorID 1-based ID of the motor to abort.
+ */
 void StepperDriver::abortCommand(uint8_t motorID)
 {
     if (motorID > motorsControlled)
@@ -291,6 +327,9 @@ void StepperDriver::abortCommand(uint8_t motorID)
     commandDone[motorID] = true;
 }
 
+/**
+ * @brief Create a pinned FreeRTOS task to run the motor driver loop on CORE_1.
+ */
 void StepperDriver::isrStartIoDriver()
 {
     vTaskDelay(0);
@@ -305,6 +344,9 @@ void StepperDriver::isrStartIoDriver()
         CORE_1);
 }
 
+/**
+ * @brief ISR that records the latest state and debounce timestamp for endstop A.
+ */
 void IRAM_ATTR StepperDriver::endstop_a_interrupt()
 {
     //endstopMux
@@ -315,6 +357,9 @@ void IRAM_ATTR StepperDriver::endstop_a_interrupt()
     portEXIT_CRITICAL_ISR(&endstopAMux);
 }
 
+/**
+ * @brief ISR that records the latest state and debounce timestamp for endstop B.
+ */
 void IRAM_ATTR StepperDriver::endstop_b_interrupt()
 {
     portENTER_CRITICAL_ISR(&endstopBMux);
@@ -324,6 +369,10 @@ void IRAM_ATTR StepperDriver::endstop_b_interrupt()
     portEXIT_CRITICAL_ISR(&endstopBMux);
 }
 
+/**
+ * @brief Debounce both endstops and return true if either is currently tripped.
+ * @return True when a stable endstop engagement has been detected.
+ */
 bool IRAM_ATTR StepperDriver::isEndstopTripped()
 {
     uint32_t saveDebounceTimeout;
@@ -392,17 +441,27 @@ bool IRAM_ATTR StepperDriver::isEndstopTripped()
 }
 
 
+/**
+ * @brief Stop the IO driver from stepping; currently just zeroes the step rate.
+ */
 void StepperDriver::isrStopIoDriver()
 {
     setStepRate(0); // TODO: clean me
 }
 
+/**
+ * @brief Entry point for the motor IO task: initialize pulse counting then run the driver loop.
+ * @param pvParameters Task parameters (unused).
+ */
 void StepperDriver::isrIoStep(void *pvParameters)
 {
     pcnt_setup_init(GPIO_STEP);
     StepperDriver::getInstance()->driver();
 }
 
+/**
+ * @brief Compare the tracked position against the current command and stop when the target is reached.
+ */
 void StepperDriver::checkLocation()
 {
     currentAngle[0] = location;
@@ -418,6 +477,10 @@ void StepperDriver::checkLocation()
     }
 }
 
+/**
+ * @brief PCNT interrupt that updates the step count based on edge thresholds and reevaluates location.
+ * @param arg Unused ISR argument attached during registration.
+ */
 void IRAM_ATTR StepperDriver::pcnt_intr_handler(void *arg)
 {
     uint32_t intr_status = PCNT.int_st.val;
@@ -465,6 +528,10 @@ void IRAM_ATTR StepperDriver::pcnt_intr_handler(void *arg)
     }
 }
 
+/**
+ * @brief Configure the Pulse Counter (PCNT) hardware for the step pin and enable interrupts.
+ * @param pin GPIO pin that supplies the step pulses.
+ */
 void StepperDriver::pcnt_setup_init(uint8_t pin)
 {
 
@@ -507,6 +574,11 @@ void StepperDriver::pcnt_setup_init(uint8_t pin)
     pcnt_counter_resume(PCNT_UNIT);
 }
 
+/**
+ * @brief Report whether the requested motor still has an outstanding command.
+ * @param motor_id 1-based ID of the motor.
+ * @return True if the motor is still executing a command.
+ */
 bool StepperDriver::isMotorRunning(uint8_t motor_id)
 {
     if (motor_id > motorsControlled)
@@ -515,6 +587,9 @@ bool StepperDriver::isMotorRunning(uint8_t motor_id)
     return !commandDone[motor_id];
 }
 
+/**
+ * @brief Loop that monitors command timeouts, polls for new operations, and keeps the motors fed.
+ */
 void IRAM_ATTR StepperDriver::driver()
 {
     while (true)
@@ -560,16 +635,31 @@ void IRAM_ATTR StepperDriver::driver()
     vTaskDelete(NULL);
 }
 
+/**
+ * @brief Request the next queued operation for the specified motor from the command layer.
+ * @param id Zero-based motor index.
+ */
 void StepperDriver::getNextOpForDriver(uint8_t id)
 {
     CommandLayer::getInstance()->getNextOp(id + 1);
 }
 
+/**
+ * @brief Ask the command layer to peek at the next operation without consuming it.
+ * @param id Zero-based motor index.
+ */
 void StepperDriver::peekOpForDriver(uint8_t id)
 {
     CommandLayer::getInstance()->peekNextOp(id + 1);
 }
 
+/**
+ * @brief Apply motor-specific configuration changes such as microstepping modes.
+ * @param setting Configuration enum identifying the change.
+ * @param data1 Primary configuration value.
+ * @param data2 Secondary configuration value (unused for microstepping).
+ * @param motorID 1-based ID of the motor.
+ */
 void StepperDriver::changeMotorSettings(config_setting setting, uint32_t data1, uint32_t data2, uint8_t motorID)
 {
     if (motorID > motorsControlled)
@@ -584,6 +674,10 @@ void StepperDriver::changeMotorSettings(config_setting setting, uint32_t data1, 
     }
 }
 
+/**
+ * @brief Configure or disable the PWM driving the step pin based on the desired rate.
+ * @param rate Frequency to apply to the step pin; zero disables the PWM.
+ */
 void StepperDriver::setStepRate(int32_t rate)
 {
     #ifndef UNITY_INCLUDE_CONFIG_H // ESP32PWM attachPin causes Unit Tests to hang
@@ -608,6 +702,10 @@ void StepperDriver::setStepRate(int32_t rate)
     #endif // !UNITTEST
 }
 
+/**
+ * @brief Toggle the sleep line on the driver, ensuring stepping is disabled first.
+ * @param sleep True to assert sleep (disable driver), false to wake.
+ */
 void StepperDriver::setSleep(boolean sleep)
 {
     setStepRate(0);
@@ -622,12 +720,21 @@ void StepperDriver::setSleep(boolean sleep)
 
 }
 
+/**
+ * @brief Return the configured logic level that represents an engaged endstop.
+ * @return True if a high pin state indicates a tripped endstop.
+ */
 bool StepperDriver::getEndstopTrippedPinSetting()
 {
     return isEndstopTrippedHigh;
 
 }
 
+/**
+ * @brief Set whether a high or low pin state indicates that an endstop is tripped.
+ * @param setting Boolean value interpreted as the tripped pin level.
+ * @return ESP_OK on success or ESP_ERR_INVALID_ARG for bad settings.
+ */
 esp_err_t StepperDriver::setEndstopTrippedPinSetting(uint8_t setting) 
 {
     esp_err_t error = ESP_OK;

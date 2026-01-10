@@ -1,3 +1,7 @@
+/**
+ * @file BrushedMotorDriver.cpp
+ * @brief Implements the singleton for controlling brushed motor bridges.
+ */
 #include "BrushedMotorDriver.h"
 #include <reent.h>
 #include "OpBuffer.h"
@@ -35,20 +39,21 @@ BrushedMotorDriver *BrushedMotorDriver::instance = NULL;
 
 //ESP32PWM pwm;
 
+/**
+ * @brief Construct the brushed motor driver, initialize GPIO, and reset command state.
+ */
 BrushedMotorDriver::BrushedMotorDriver() : MotorDriver()
 {
     Serial.write("BrushedMotorDriver const\n");
     peekTicks = peekRate;
     initMotorGpio();
     memset(commandDone, 1, MAX_BrushedMotor_MOTORS);
-    /* commandDone[0] = 0;
-    startTime[0] = esp_timer_get_time();
-    commandDeltaTime[0] = 10000000;
-    startAngle[0] = 0;
-    commandDeltaAngle[0] = 360; */
-    //servo.attach(GPIO_STEP);
 }
 
+/**
+ * @brief Return the singleton BrushedMotorDriver instance.
+ * @return Pointer to the global BrushedMotorDriver.
+ */
 BrushedMotorDriver *IRAM_ATTR BrushedMotorDriver::getInstance()
 {
     if (instance == NULL)
@@ -59,6 +64,9 @@ BrushedMotorDriver *IRAM_ATTR BrushedMotorDriver::getInstance()
     return instance;
 }
 
+/**
+ * @brief Configure the GPIOs for the brushed motor bridge and endstop inputs.
+ */
 void BrushedMotorDriver::initMotorGpio()
 {
     motorsControlled = 2;
@@ -83,6 +91,10 @@ void BrushedMotorDriver::initMotorGpio()
 // targetAngle: direction, 1 forward, 0 coast, -1 reverse
 // rate: speed 0-255
 //
+/**
+ * @brief Move the brushed motor to a specific target based on the signed speed value.
+ * @param motorID One-based motor identifier.
+ */
 void BrushedMotorDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID)
 {
     //double goToDegrees = (double)targetAngle;
@@ -128,6 +140,10 @@ void BrushedMotorDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t m
     log_i("command: motorGoTo %d %d %d %d ", startAngle[motorID], commandDeltaAngle[motorID], startTime[motorID], commandDeltaTime[motorID]);
 }
 
+/**
+ * @brief Apply the given signed speed directly, mimicking a move command.
+ * @param motorID One-based motor identifier.
+ */
 void BrushedMotorDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorID)
 {
     //double goToDegrees = (double)targetAngle;
@@ -172,6 +188,12 @@ void BrushedMotorDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t m
     log_i("command: motorGoTo %d %d %d %d ", startAngle[motorID], commandDeltaAngle[motorID], startTime[motorID], commandDeltaTime[motorID]);
 }
 
+/**
+ * @brief Hold the motors for the specified duration before allowing new commands.
+ * @param wait_time
+ * @param precision
+ * @param motorID One-based motor identifier.
+ */
 void BrushedMotorDriver::motorStop(signed int wait_time, unsigned short precision, uint8_t motorID)
 {
     // wait_time, cycles to wait
@@ -193,6 +215,10 @@ void BrushedMotorDriver::motorStop(signed int wait_time, unsigned short precisio
     log_i("command %d %d %d %d ", startAngle[motorID], commandDeltaAngle[motorID], startTime[motorID], commandDeltaTime[motorID]);
 }
 
+/**
+ * @brief Immediately disable the bridge outputs and mark the command done.
+ * @param motorID One-based motor identifier.
+ */
 void BrushedMotorDriver::abortCommand(uint8_t motorID)
 {
     log_i("abort command");
@@ -203,6 +229,9 @@ void BrushedMotorDriver::abortCommand(uint8_t motorID)
     commandDone[motorID] = true;
 }
 
+/**
+ * @brief Create a FreeRTOS task pinned to CORE_1 to handle the driver loop.
+ */
 void BrushedMotorDriver::isrStartIoDriver()
 {
     vTaskDelay(0);
@@ -217,9 +246,11 @@ void BrushedMotorDriver::isrStartIoDriver()
         CORE_1);
 }
 
+/**
+ * @brief ISR that updates the cached state for endstop A.
+ */
 void IRAM_ATTR BrushedMotorDriver::endstop_a_interrupt()
 {
-    //stopWaveform();
     if (digitalRead(GPIO_IO_A) == 0)
     {
         BrushedMotorDriver::getInstance()->endstop_a = 1;
@@ -231,6 +262,9 @@ void IRAM_ATTR BrushedMotorDriver::endstop_a_interrupt()
     }
 }
 
+/**
+ * @brief ISR that updates the cached state for endstop B.
+ */
 void IRAM_ATTR BrushedMotorDriver::endstop_b_interrupt()
 {
     if (digitalRead(GPIO_IO_B) == 0)
@@ -244,6 +278,9 @@ void IRAM_ATTR BrushedMotorDriver::endstop_b_interrupt()
     }
 }
 
+/**
+ * @brief Tear down the brushed driver outputs and enable motor sleep.
+ */
 void BrushedMotorDriver::isrStopIoDriver()
 {
     digitalWrite(GPIO_nSLEEP, LOW);
@@ -253,6 +290,10 @@ void BrushedMotorDriver::isrStopIoDriver()
     digitalWrite(GPIO_IN2, LOW);
 }
 
+/**
+ * @brief Entry point for the brushed motor driver task; initializes PWM and invokes driver().
+ * @param pvParameters Task parameter (unused).
+ */
 void BrushedMotorDriver::isrIoBDC(void *pvParameters)
 {
     pinMode(GPIO_IN1, OUTPUT);
@@ -268,11 +309,19 @@ void BrushedMotorDriver::isrIoBDC(void *pvParameters)
     BrushedMotorDriver::getInstance()->driver();
 }
 
+/**
+ * @brief Report whether a motor still has a pending command.
+ * @param motor_id Zero-based motor index.
+ * @return True if the motor is still executing a command.
+ */
 bool BrushedMotorDriver::isMotorRunning(uint8_t motor_id)
 {
     return !commandDone[motor_id];
 }
 
+/**
+ * @brief Main loop that checks for command timeouts and pulls operations from the command layer.
+ */
 void IRAM_ATTR BrushedMotorDriver::driver()
 {
     volatile uint_fast64_t delta;
@@ -314,16 +363,31 @@ void IRAM_ATTR BrushedMotorDriver::driver()
     vTaskDelete(NULL);
 }
 
+/**
+ * @brief Request the next operation from the command layer for polling.
+ * @param id Zero-based motor index.
+ */
 void BrushedMotorDriver::getNextOpForDriver(uint8_t id)
 {
     CommandLayer::getInstance()->getNextOp(id + 1);
 }
 
+/**
+ * @brief Peek at the next operation without dequeuing it.
+ * @param id Zero-based motor index.
+ */
 void BrushedMotorDriver::peekOpForDriver(uint8_t id)
 {
     CommandLayer::getInstance()->peekNextOp(id + 1);
 }
 
+/**
+ * @brief Adjust driver configuration; currently unimplemented.
+ * @param setting Configuration selector.
+ * @param data1 Primary argument.
+ * @param data2 Secondary argument.
+ * @param motorID One-based motor identifier.
+ */
 void BrushedMotorDriver::changeMotorSettings(config_setting setting, uint32_t data1, uint32_t data2, uint8_t motorID)
 {
     if (motorID > motorsControlled)
@@ -331,6 +395,11 @@ void BrushedMotorDriver::changeMotorSettings(config_setting setting, uint32_t da
     motorID--;
 }
 
+/**
+ * @brief Set the direction and PWM duty cycle for the brushed motor bridge.
+ * @param power Value 0-255 that controls PWM duty cycle.
+ * @param mDirection Direction flag (1 forward, 0 reverse).
+ */
 void BrushedMotorDriver::setSpeed(uint8_t power, int8_t mDirection)
 {
     float scaledPower = 0.0;
