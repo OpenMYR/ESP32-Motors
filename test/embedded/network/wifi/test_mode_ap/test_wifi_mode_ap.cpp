@@ -31,12 +31,14 @@ void test_wifi_ap_to_sta(void){
     String pass = "test";
 
     TEST_ASSERT_EQUAL(ESP_OK, WifiController::tryConnectToSta(&ssid, &pass));
+    WifiController::processStateEvents();
     TEST_ASSERT_EQUAL(WifiController::MYR_WIFI_STATE_AP_STA_CONNECTING, WifiController::getWiFiState());  // can this be MYR_WIFI_STATE_STA_CONNECTING or MYR_WIFI_STATE_AP_STA_CONNECTING
 }
 
 void test_wifi_sta_to_ap(void){
 
     WifiController::fireWifiEvent(WifiController::MYR_WIFI_EVENT_DISCONNECT, NULL);
+    WifiController::processStateEvents();
     TEST_ASSERT_EQUAL(WifiController::MYR_WIFI_STATE_AP, WifiController::getWiFiState());
 }
 

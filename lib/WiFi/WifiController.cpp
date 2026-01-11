@@ -148,6 +148,10 @@ void WifiController::fireWifiEvent(myr_wifi_event_t event, void *data) {
     esp_event_post_to(state_loop_handle, MYR_WIFI_EVENT_BASE, event, data, 0, portMAX_DELAY);
 }
 
+void WifiController::processStateEvents(uint32_t timeout_ms) {
+    esp_event_loop_run(state_loop_handle, (int32_t)pdMS_TO_TICKS(timeout_ms));
+}
+
 void WifiController::fConnectTo() {
     log_i("fConnectTo");
     killStateTimer();

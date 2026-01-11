@@ -46,6 +46,9 @@ class WifiController {
         static esp_err_t setDefaultMode(uint8_t mode);
         static void changeOTAPass(const String* oldPass, const String* pass);
         static myr_wifi_state_t getWiFiState();
+        // Test-helper: pumps the WifiController state event loop to process
+        // any queued events. Intended for unit tests to avoid race coditions.
+        static void processStateEvents(uint32_t timeout_ms = 10);
         
         // Constants
         static constexpr const char* MYR_WIFI_PREF_TAG_INIT = "WiFi Init";
