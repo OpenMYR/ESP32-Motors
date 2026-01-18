@@ -682,7 +682,7 @@ void StepperDriver::changeMotorSettings(config_setting setting, uint32_t data1, 
 void StepperDriver::setStepRate(int32_t rate)
 {
     // todo document this bug
-    #ifndef UNITY_INCLUDE_CONFIG_H // ESP32PWM attachPin causes Unit Tests to hang
+    #ifndef PIO_UNIT_TESTING // ESP32PWM attachPin causes Unit Tests to hang
     
     if (abs(rate) != 0)
     {
@@ -701,7 +701,7 @@ void StepperDriver::setStepRate(int32_t rate)
         pwm.detachPin(GPIO_STEP);
         digitalWrite(GPIO_STEP, LOW);
     }
-    #endif // !UNITTEST
+    #endif // !PIO_UNIT_TESTING
 }
 
 /**
