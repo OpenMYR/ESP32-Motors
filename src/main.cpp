@@ -1,8 +1,4 @@
-#if __has_include("config/LocalConfig.h")
-#include "config/LocalConfig.h"
-#else
-#include "config/DefaultConfig.h"
-#endif
+#include "config/Config.h"
 
 #include <Arduino.h>
 #include <WiFi.h>

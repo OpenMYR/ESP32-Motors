@@ -1,93 +1,58 @@
-#include <Arduino.h>
+#include <string>
+
 #include <unity.h>
 
 #include "WifiController.h"
-#include <Preferences.h>
-#include "config/DefaultConfig.h"
+#include "config/Config.h"
+#include "nvs.h"
+#include "nvs_flash.h"
 
-static Preferences preferences;
+namespace {
+void clear_wifi_nvs() {
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        TEST_ASSERT_EQUAL(ESP_OK, nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    if (err != ESP_OK && err != ESP_ERR_NVS_INVALID_STATE) {
+        TEST_ASSERT_EQUAL(ESP_OK, err);
+    }
+
+    nvs_handle_t nvsHandle;
+    err = nvs_open("myr", NVS_READWRITE, &nvsHandle);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_erase_all(nvsHandle));
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_set_u8(nvsHandle, WifiController::MYR_WIFI_PREF_TAG_INIT, 1));
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_set_u8(nvsHandle, WifiController::MYR_WIFI_PREF_TAG_MODE, MYR_WIFI_MODE_AP));
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_commit(nvsHandle));
+    nvs_close(nvsHandle);
+}
+} // namespace
 
 void setUp(void) {
-    // set stuff up here    
+    clear_wifi_nvs();
 }
 
 void tearDown(void) {
-    // clean stuff up here
 }
 
-void test_wifi_default_to_ap(void){
-    
-    preferences.begin("myr", false);
-    preferences.putUChar(WifiController::MYR_WIFI_PREF_TAG_INIT, 1);
-    preferences.putUChar(WifiController::MYR_WIFI_PREF_TAG_MODE, MYR_WIFI_MODE_AP);
-    preferences.end();
+void test_wifi_mode_transitions(void) {
     TEST_ASSERT_EQUAL(ESP_OK, WifiController::init());
     TEST_ASSERT_EQUAL(WifiController::MYR_WIFI_STATE_AP, WifiController::getWiFiState());
-}
 
-void test_wifi_sta_to_sta(void){
-
-    String ssid = "test";
-    String pass = "test";
-
+    std::string ssid = "TestNetwork";
+    std::string pass = "TestPass";
     TEST_ASSERT_EQUAL(ESP_OK, WifiController::tryConnectToSta(&ssid, &pass));
     WifiController::processStateEvents();
-    TEST_ASSERT_EQUAL(WifiController::MYR_WIFI_STATE_AP_STA_CONNECTING, WifiController::getWiFiState());   // can this be MYR_WIFI_STATE_STA_CONNECTING or MYR_WIFI_STATE_AP_STA_CONNECTING
-}
+    TEST_ASSERT_EQUAL(WifiController::MYR_WIFI_STATE_AP_STA_CONNECTING, WifiController::getWiFiState());
 
-void test_wifi_sta_to_ap(void){
-
-    WifiController::fireWifiEvent(WifiController::MYR_WIFI_EVENT_DISCONNECT, NULL);
+    WifiController::fireWifiEvent(WifiController::MYR_WIFI_EVENT_DISCONNECT, nullptr);
     WifiController::processStateEvents();
     TEST_ASSERT_EQUAL(WifiController::MYR_WIFI_STATE_AP, WifiController::getWiFiState());
 }
 
-void test_wifi_sta_credentials(void){
-
-    esp_err_t err;
-    String ssid = "Test";
-    String pass = "Test";
-    
-    TEST_ASSERT_EQUAL(ESP_OK, WifiController::setDefaultStaCredentials(&ssid, &pass));
-}
-
-void test_wifi_ap_credentials(void){
-
-    String ssid = "Test";
-    String pass = "Test";
-    
-    TEST_ASSERT_EQUAL(ESP_OK, WifiController::setDefaultApCredentials(&ssid, &pass));
-}
-
-void test_setDefaultApCredentials(void) {
-    String ssid = "TestAP";
-    String pass = "password";
-    TEST_ASSERT_EQUAL(ESP_OK, WifiController::setDefaultApCredentials(&ssid, &pass));
-}
-
-void test_setDefaultStaCredentials(void) {
-    String ssid = "TestSTA";
-    String pass = "password";
-    TEST_ASSERT_EQUAL(ESP_OK, WifiController::setDefaultStaCredentials(&ssid, &pass));
-}
-
-void setup()
-{
-
-    delay(2000); // service delay
+extern "C" void app_main(void) {
     UNITY_BEGIN();
-
-    RUN_TEST(test_wifi_default_to_ap);
-    RUN_TEST(test_wifi_sta_credentials);
-    RUN_TEST(test_wifi_sta_to_sta);
-    RUN_TEST(test_wifi_sta_to_ap);
-    RUN_TEST(test_wifi_ap_credentials);
-    RUN_TEST(test_setDefaultApCredentials);
-    RUN_TEST(test_setDefaultStaCredentials);
-
-    UNITY_END(); // stop unit testing
-}
-
-void loop()
-{
+    RUN_TEST(test_wifi_mode_transitions);
+    UNITY_END();
 }

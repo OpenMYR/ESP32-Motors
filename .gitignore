@@ -42,6 +42,7 @@
 .vscode/extensions.json
 
 # Local Project
-src/config/LocalConfig.h
-/package-lock.json
 include/config/LocalConfig.h
+/package-lock.json
+/.pio_home/
+/managed_components/

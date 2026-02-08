@@ -1,9 +1,6 @@
-#if __has_include("config/LocalConfig.h")
-#include "config/LocalConfig.h"
-#else
-#include "config/DefaultConfig.h"
-#endif
+#include "config/Config.h"
 
+#include <string>
 #include <esp_log.h>
 
 #include "CommandParser.h"
@@ -147,8 +144,10 @@ void CommandParser::parseConfig(JsonObject *cmd, char code)
         return;
     }
     esp_err_t err;
-    String ssid = dataArray[0];
-    String pass = dataArray[1];
+    String ssidString = dataArray[0];
+    String passString = dataArray[1];
+    std::string ssid = ssidString.c_str();
+    std::string pass = passString.c_str();
 
     if(code == 'C') {
         err = WifiController::tryConnectToSta(&ssid, &pass);
@@ -160,7 +159,7 @@ void CommandParser::parseConfig(JsonObject *cmd, char code)
         ESP_ERROR_CHECK_WITHOUT_ABORT(err);
     }
     else if(code == 'D') {
-        WifiController::fireWifiEvent(WifiController::MYR_WIFI_EVENT_DISCONNECT, NULL);
+        WifiController::fireWifiEvent(WifiController::MYR_WIFI_EVENT_DISCONNECT, nullptr);
         err = WifiController::setDefaultMode(MYR_WIFI_MODE_AP);
         ESP_ERROR_CHECK_WITHOUT_ABORT(err);
     } else if(code == 'O') WifiController::changeOTAPass(&ssid, &pass);
