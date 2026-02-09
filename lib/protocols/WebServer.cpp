@@ -7,6 +7,7 @@
 #include <string>
 
 #include "WifiController.h"
+#include "OpBuffer.h"
 #include "cJSON.h"
 #include "config/Config.h"
 #include "esp_http_server.h"
@@ -196,6 +197,60 @@ esp_err_t handle_config_command(char code, cJSON *data) {
     return ESP_OK;
 }
 
+esp_err_t parse_motor_data(cJSON *data, Op *op) {
+    if (!cJSON_IsArray(data)) return ESP_ERR_INVALID_ARG;
+    if (cJSON_GetArraySize(data) != 4) return ESP_ERR_INVALID_ARG;
+
+    cJSON *motorIdItem = cJSON_GetArrayItem(data, 0);
+    cJSON *queueItem = cJSON_GetArrayItem(data, 1);
+    cJSON *stepNumItem = cJSON_GetArrayItem(data, 2);
+    cJSON *stepRateItem = cJSON_GetArrayItem(data, 3);
+    if (!cJSON_IsNumber(motorIdItem)) return ESP_ERR_INVALID_ARG;
+    if (!cJSON_IsNumber(queueItem)) return ESP_ERR_INVALID_ARG;
+    if (!cJSON_IsNumber(stepNumItem)) return ESP_ERR_INVALID_ARG;
+    if (!cJSON_IsNumber(stepRateItem)) return ESP_ERR_INVALID_ARG;
+
+    op->port = 0;
+    op->motorID = static_cast<uint8_t>(motorIdItem->valueint);
+    op->queue = static_cast<uint8_t>(queueItem->valueint);
+    op->stepNum = static_cast<int32_t>(stepNumItem->valueint);
+    op->stepRate = static_cast<uint16_t>(stepRateItem->valueint);
+    return ESP_OK;
+}
+
+esp_err_t enqueue_motor_op(const Op *op) {
+    OpBuffer *buffer = OpBuffer::getInstance();
+
+    if (op->queue == 0) {
+        buffer->clear(op->motorID);
+        buffer->killCurrentOp(op->motorID);
+    }
+
+    Op opCopy = *op;
+    if (buffer->storeOp(&opCopy) < 0) return ESP_FAIL;
+    return ESP_OK;
+}
+
+esp_err_t handle_motor_motion_command(char code, cJSON *data) {
+    Op op = {};
+    esp_err_t err = parse_motor_data(data, &op);
+    if (err != ESP_OK) return err;
+
+    op.opcode = code;
+    return enqueue_motor_op(&op);
+}
+
+esp_err_t handle_motor_config_command(char code, cJSON *data) {
+    Op op = {};
+    esp_err_t err = parse_motor_data(data, &op);
+    if (err != ESP_OK) return err;
+
+    op.opcode = code;
+    // Preserve legacy payload mapping for motor config commands.
+    op.stepNum = 0;
+    return enqueue_motor_op(&op);
+}
+
 esp_err_t process_command_payload(const char *payload) {
     cJSON *root = cJSON_Parse(payload);
     if (root == nullptr) return ESP_ERR_INVALID_ARG;
@@ -221,7 +276,17 @@ esp_err_t process_command_payload(const char *payload) {
             break;
         }
 
-        err = handle_config_command(code->valuestring[0], data);
+        char opcode = code->valuestring[0];
+        if (opcode == 'C' || opcode == 'D' || opcode == 'O') {
+            err = handle_config_command(opcode, data);
+        } else if (opcode == 'M' || opcode == 'S' || opcode == 'G' || opcode == 'I') {
+            err = handle_motor_motion_command(opcode, data);
+        } else if (opcode == 'U' || opcode == 'H' || opcode == 'L') {
+            err = handle_motor_config_command(opcode, data);
+        } else {
+            ESP_LOGD(TAG, "POST command '%c' ignored", opcode);
+            err = ESP_OK;
+        }
         if (err != ESP_OK) break;
     }
 
@@ -290,6 +355,8 @@ bool WebServer::init() {
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.uri_match_fn = httpd_uri_match_wildcard;
+    // POST processing includes request-body buffering and JSON parse work.
+    config.stack_size = 8192;
 
     esp_err_t err = httpd_start(&g_server, &config);
     if (err != ESP_OK) {

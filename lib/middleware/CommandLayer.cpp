@@ -1,42 +1,46 @@
 #include "config/Config.h"
 
 #include "CommandLayer.h"
-#include "ServoDriver.h"
-#include "StepperDriver.h"
-#include "BrushedMotorDriver.h"
+
+#include "esp_log.h"
 #include "OpBuffer.h"
 
-#define CORE_1 1
-#define UPDATE_FREQ 60
+#if SERVO == 1
+#include "ServoDriver.h"
+#elif STEPPER == 1
+#include "StepperDriver.h"
+#elif BDC == 1
+#include "BrushedMotorDriver.h"
+#endif
 
-#define UPDATE_DWELL 1000 / UPDATE_FREQ
+namespace {
+const char *TAG = "CommandLayer";
+}
 
-hw_timer_t *timerOpCode = NULL;
-CommandLayer *CommandLayer::instance = NULL;
-MotorDriver *CommandLayer::driver = NULL;
+CommandLayer *CommandLayer::instance = nullptr;
+MotorDriver *CommandLayer::driver = nullptr;
 
 CommandLayer::CommandLayer()
 {
-
-#if SERVO==1
+#if SERVO == 1
     driver = ServoDriver::getInstance();
-#elif STEPPER==1
+#elif STEPPER == 1
     driver = StepperDriver::getInstance();
-#elif BDC==1
+#elif BDC == 1
     driver = BrushedMotorDriver::getInstance();
 #endif
-    log_v("CommandLayer const\n");
+    ESP_LOGV(TAG, "CommandLayer ctor");
 }
 
 void CommandLayer::init()
 {
     CommandLayer::driver->isrStartIoDriver();
-    log_v("CommandLayer init\n");
+    ESP_LOGV(TAG, "CommandLayer init");
 }
 
 CommandLayer *CommandLayer::getInstance()
 {
-    if (instance == NULL)
+    if (instance == nullptr)
     {
         instance = new CommandLayer();
     }
@@ -81,7 +85,7 @@ void CommandLayer::fetchMotorOpCode(uint8_t id)
 
 void CommandLayer::FillDriverFromQueue()
 {
-    /*     delay(100);
+    /* Legacy queue feeder path kept for reference.
     while (true)
     {
         for (int i = 0; (i < MAX_MOTORS); i++)
@@ -98,7 +102,8 @@ void CommandLayer::FillDriverFromQueue()
 
 void CommandLayer::parseSubmittOp(uint8_t id, Op *op)
 {
-    if (op == NULL)
+    (void)id;
+    if (op == nullptr)
         return;
     //log_i("Code: %d", (int)(op->opcode));
     switch (op->opcode)
@@ -142,7 +147,7 @@ void CommandLayer::getNextOp(uint8_t driverId)
 void CommandLayer::peekNextOp(uint8_t driverId)
 {
     Op *peekedOp = OpBuffer::getInstance()->peekOp(driverId);
-    if (peekedOp == NULL)
+    if (peekedOp == nullptr)
     {
         return;
     }

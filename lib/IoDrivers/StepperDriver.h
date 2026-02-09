@@ -8,6 +8,8 @@
 
 #include <stdint.h>
 
+#include <driver/pulse_cnt.h>
+
 #include "MotorDriver.h"
 #include "Op.h"
 #include "CommandLayer.h"
@@ -20,6 +22,16 @@
 class StepperDriver : public MotorDriver
 {
 public:
+    struct MotionPlan
+    {
+        int32_t goalStep = 0;
+        uint32_t steps = 0;
+        uint64_t durationUs = 0;
+    };
+
+    static MotionPlan planRelativeMove(int32_t currentStep, int32_t deltaStep, uint16_t stepRate);
+    static MotionPlan planAbsoluteMove(int32_t currentStep, int32_t targetStep, uint16_t stepRate);
+
     /** @brief Create the singleton and initialize GPIO. */
     StepperDriver();
 
@@ -84,15 +96,15 @@ private:
     void initMotorGpio();
 
     static void IRAM_ATTR isrIoStep(void *);
-    void IRAM_ATTR driver();
+    void driver();
 
     static StepperDriver *instance;
     CommandLayer *commandInstance;
     TaskHandle_t motorTaskHandle;
-    static void IRAM_ATTR endstop_a_interrupt();
-    static void IRAM_ATTR endstop_b_interrupt();
+    static void IRAM_ATTR endstop_a_interrupt(void *);
+    static void IRAM_ATTR endstop_b_interrupt(void *);
     static void setStepRate(int32_t rate);
-    static void setSleep(boolean sleep);
+    static void setSleep(bool sleep);
     static void addSteps(uint32_t steps);
     static void addSteps(uint32_t steps, uint16_t microstepRate);
     static uint16_t getMicroStepRate();
@@ -101,12 +113,12 @@ private:
         void checkLocation();
 
     static void pcnt_setup_init(uint8_t pin);
-    static void IRAM_ATTR pcnt_intr_handler(void *arg);
+    static bool IRAM_ATTR pcnt_watch_handler(pcnt_unit_handle_t unit, const pcnt_watch_event_data_t *edata, void *user_ctx);
 
     struct stepper_conf
     {
-        double_t min = 0;
-        double_t max = 3000;
+        double min = 0;
+        double max = 3000;
     };
 
     stepper_conf confs[MAX_STEPPER_MOTORS];
@@ -114,12 +126,12 @@ private:
     bool motorSleeping = false;
 
     bool commandDone[MAX_STEPPER_MOTORS] = {1};
-    double_t currentAngle[MAX_STEPPER_MOTORS] = {0};  // angle is integer of steps in stepper driver.
-    double_t homeSoftAngle[MAX_STEPPER_MOTORS] = {0};  // 
-    double_t homeRealAngle[MAX_STEPPER_MOTORS] = {0};  // 
+    double currentAngle[MAX_STEPPER_MOTORS] = {0};  // angle is integer of steps in stepper driver.
+    double homeSoftAngle[MAX_STEPPER_MOTORS] = {0};  // 
+    double homeRealAngle[MAX_STEPPER_MOTORS] = {0};  // 
 
-    double_t startAngle[MAX_STEPPER_MOTORS] = {0};
-    double_t commandDeltaAngle[MAX_STEPPER_MOTORS] = {180};
+    double startAngle[MAX_STEPPER_MOTORS] = {0};
+    double commandDeltaAngle[MAX_STEPPER_MOTORS] = {180};
     uint64_t startTime[MAX_STEPPER_MOTORS] = {90};
     uint64_t commandDeltaTime[MAX_STEPPER_MOTORS] = {0};
     uint64_t degreesToSteps(double);

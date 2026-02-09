@@ -1,6 +1,8 @@
 #include "FileIO.h"
 #include "WebServer.h"
 #include "WifiController.h"
+#include "OpBuffer.h"
+#include "CommandLayer.h"
 
 #include "esp_err.h"
 #include "esp_log.h"
@@ -30,6 +32,9 @@ extern "C" void __attribute__((weak)) app_main(void) {
         ESP_LOGE(TAG, "FileIO init failed");
         return;
     }
+
+    OpBuffer::getInstance();
+    CommandLayer::getInstance()->init();
 
     if (!WebServer::init()) {
         ESP_LOGE(TAG, "WebServer init failed");

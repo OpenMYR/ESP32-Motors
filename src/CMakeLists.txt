@@ -4,11 +4,17 @@ idf_component_register(
         "../lib/WiFi/WifiController.cpp"
         "../lib/generic/Lookup.cpp"
         "../lib/generic/FileIO.cpp"
+        "../lib/Op/OpBuffer.cpp"
+        "../lib/middleware/CommandLayer.cpp"
+        "../lib/IoDrivers/StepperDriver.cpp"
         "../lib/protocols/WebServer.cpp"
     INCLUDE_DIRS
         "../include"
         "../lib/WiFi"
         "../lib/generic"
+        "../lib/Op"
+        "../lib/middleware"
+        "../lib/IoDrivers"
         "../lib/protocols"
     REQUIRES
         esp_http_server
@@ -18,4 +24,6 @@ idf_component_register(
         nvs_flash
         littlefs
         json
+        driver
+        esp_timer
 )

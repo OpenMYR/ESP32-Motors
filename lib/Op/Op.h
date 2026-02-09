@@ -1,7 +1,7 @@
 #ifndef MYR_OP_H
 #define MYR_OP_H
 
-#include <IPAddress.h>
+#include <stdint.h>
 
 typedef struct Op {
     unsigned short port;
@@ -10,7 +10,7 @@ typedef struct Op {
     int32_t stepNum;
     uint16_t stepRate;
     uint8_t motorID;
-	IPAddress sourceIPAddr;
+    uint32_t sourceIPAddr;
 
     Op()
     {
@@ -37,7 +37,7 @@ typedef struct Op {
         motorID = data[10]; 
         sourceIPAddr = ip;
     }
- } Op;
+} Op;
 
 struct command_response_packet {
 	char opcode;
