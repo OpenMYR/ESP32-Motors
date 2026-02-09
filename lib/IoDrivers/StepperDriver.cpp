@@ -32,6 +32,7 @@ constexpr ledc_channel_t kStepLedsChannel = LEDC_CHANNEL_0;
 constexpr ledc_timer_bit_t kStepLedsResolution = LEDC_TIMER_10_BIT;
 constexpr uint32_t kStepLedsDuty = 512;
 constexpr uint32_t kStepLedsClkSrc = LEDC_AUTO_CLK;
+constexpr uint64_t kMicrosecondsPerMillisecond = 1000ULL;
 bool gStepPwmInitialized = false;
 bool gGpioIsrServiceInstalled = false;
 constexpr uint32_t kCommandTimingMarginUs = 100;
@@ -45,7 +46,7 @@ StepperDriver *StepperDriver::instance = nullptr;
 static uint8_t peekTicks = 5;
 static uint8_t peekRate = 5;
 
-#define GPIO_STEP 16
+#define GPIO_STEP 22
 #define GPIO_STEP_ENABLE 27
 #define GPIO_STEP_DIR 13
 #define GPIO_USTEP_MS1 12
@@ -55,7 +56,7 @@ static uint8_t peekRate = 5;
 
 //end stop
 #define GPIO_IO_A 21
-#define GPIO_IO_B 22
+#define GPIO_IO_B 16
 #define MYR_DEFAULT_DEBOUNCE_MS 10 // TODO: NVS config
 
 #define PCNT_H_LIM_VAL 100
@@ -141,6 +142,12 @@ StepperDriver::MotionPlan StepperDriver::planAbsoluteMove(int32_t currentStep, i
     }
     plan.durationUs = (static_cast<uint64_t>(plan.steps) * 1000000ULL) / static_cast<uint64_t>(stepRate);
     return plan;
+}
+
+uint64_t StepperDriver::planDwellDurationUs(int32_t waitCycles, uint16_t precisionMs)
+{
+    const int64_t cycles = waitCycles >= 0 ? static_cast<int64_t>(waitCycles) : -static_cast<int64_t>(waitCycles);
+    return static_cast<uint64_t>(cycles) * static_cast<uint64_t>(precisionMs) * kMicrosecondsPerMillisecond;
 }
 
 /**
@@ -371,8 +378,8 @@ void StepperDriver::motorStop(int32_t wait_time, uint16_t precision, uint8_t mot
     }
 
     motorDwell = true;
-    startTime[0] = esp_timer_get_time();
-    commandDeltaTime[motorID] = startTime[0] + (uint64_t)abs(wait_time) * (uint64_t)precision;
+    startTime[motorID] = esp_timer_get_time();
+    commandDeltaTime[motorID] = startTime[motorID] + planDwellDurationUs(wait_time, precision);
     commandDone[motorID] = false;
     
     if(motorSleeping){
@@ -405,11 +412,10 @@ void StepperDriver::motorSleep(int32_t wait_time, uint16_t precision, uint8_t mo
     }
 
     motorDwell = true;
-    startTime[0] = esp_timer_get_time();
-    commandDeltaTime[motorID] = startTime[0] + (abs(wait_time) * precision);
+    startTime[motorID] = esp_timer_get_time();
+    commandDeltaTime[motorID] = startTime[motorID] + planDwellDurationUs(wait_time, precision);
     commandDone[motorID] = false;
 
-    setSleep(true);
     motorSleeping = true;
     setSleep(motorSleeping);
 
