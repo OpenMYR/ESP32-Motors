@@ -46,7 +46,7 @@ StepperDriver *StepperDriver::instance = nullptr;
 static uint8_t peekTicks = 5;
 static uint8_t peekRate = 5;
 
-#define GPIO_STEP 22
+#define GPIO_STEP 16
 #define GPIO_STEP_ENABLE 27
 #define GPIO_STEP_DIR 13
 #define GPIO_USTEP_MS1 12
@@ -56,7 +56,7 @@ static uint8_t peekRate = 5;
 
 //end stop
 #define GPIO_IO_A 21
-#define GPIO_IO_B 16
+#define GPIO_IO_B 22
 #define MYR_DEFAULT_DEBOUNCE_MS 10 // TODO: NVS config
 
 #define PCNT_H_LIM_VAL 100
