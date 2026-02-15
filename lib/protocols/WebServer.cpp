@@ -8,16 +8,24 @@
 
 #include "WifiController.h"
 #include "OpBuffer.h"
+#include "WebCommandDispatcher.h"
+#include "WebServerUtils.h"
 #include "cJSON.h"
 #include "config/Config.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
+#include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 namespace {
 const char *TAG = "WebServer";
 httpd_handle_t g_server = nullptr;
 constexpr size_t kMaxUriPathLen = 256;
 constexpr size_t kMaxCommandBodyLen = 2048;
+constexpr size_t kMaxAuthHeaderLen = 192;
+constexpr size_t kMaxOtaChunkLen = 1024;
 
 #if SERVO == 1
 const char *kWebRoot = "/littlefs/web_srv";
@@ -32,6 +40,10 @@ enum class StaticPathStatus {
     InvalidUri = 1,
     NotFound = 2,
 };
+
+#ifndef MIN
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
 
 const char *content_type_for_path(const char *path) {
     const char *ext = strrchr(path, '.');
@@ -67,31 +79,13 @@ bool file_exists(const char *path) {
     return stat(path, &st) == 0;
 }
 
-bool extract_uri_path(const char *uri, char *uri_path, size_t uri_path_len) {
-    size_t uri_len = strcspn(uri, "?");
-    if (uri_len == 0 || uri_len >= uri_path_len) return false;
-
-    memcpy(uri_path, uri, uri_len);
-    uri_path[uri_len] = '\0';
-
-    if (strcmp(uri_path, "/") == 0) {
-        strlcpy(uri_path, "/index.html", uri_path_len);
-    }
-
-    if (uri_path[0] != '/') return false;
-    if (strstr(uri_path, "..") != nullptr) return false;
-    if (strchr(uri_path, '\\') != nullptr) return false;
-
-    return true;
-}
-
 StaticPathStatus resolve_static_path(
     const char *uri,
     const char *root,
     char *path,
     size_t path_len) {
     char uri_path[kMaxUriPathLen];
-    if (!extract_uri_path(uri, uri_path, sizeof(uri_path))) return StaticPathStatus::InvalidUri;
+    if (!WebServerUtils::extractUriPath(uri, uri_path, sizeof(uri_path))) return StaticPathStatus::InvalidUri;
 
     int n = snprintf(path, path_len, "%s%s", root, uri_path);
     if (n < 0 || static_cast<size_t>(n) >= path_len) return StaticPathStatus::InvalidUri;
@@ -148,150 +142,91 @@ esp_err_t read_post_body(httpd_req_t *req, char *payload, size_t payload_len) {
     return ESP_OK;
 }
 
-esp_err_t parse_config_pair(cJSON *data, std::string *lhs, std::string *rhs) {
-    if (!cJSON_IsArray(data)) return ESP_ERR_INVALID_ARG;
-    if (cJSON_GetArraySize(data) != 2) return ESP_ERR_INVALID_ARG;
 
-    cJSON *lhs_item = cJSON_GetArrayItem(data, 0);
-    cJSON *rhs_item = cJSON_GetArrayItem(data, 1);
-    if (!cJSON_IsString(lhs_item) || lhs_item->valuestring == nullptr) return ESP_ERR_INVALID_ARG;
-    if (!cJSON_IsString(rhs_item) || rhs_item->valuestring == nullptr) return ESP_ERR_INVALID_ARG;
-
-    *lhs = lhs_item->valuestring;
-    *rhs = rhs_item->valuestring;
-    return ESP_OK;
+void request_basic_auth(httpd_req_t *req) {
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"" MYR_OTA_AUTH_REALM "\"");
+    httpd_resp_sendstr(req, "Authentication required");
 }
 
-esp_err_t handle_config_command(char code, cJSON *data) {
-    if (code == 'C') {
-        std::string ssid;
-        std::string pass;
-        esp_err_t err = parse_config_pair(data, &ssid, &pass);
-        if (err != ESP_OK) return err;
-
-        err = WifiController::tryConnectToSta(&ssid, &pass);
-        if (err != ESP_OK) return err;
-
-        err = WifiController::setDefaultStaCredentials(&ssid, &pass);
-        if (err != ESP_OK) return err;
-
-        return WifiController::setDefaultMode(MYR_WIFI_MODE_STATION);
+bool ensure_authenticated(httpd_req_t *req) {
+    char auth_header[kMaxAuthHeaderLen];
+    if (httpd_req_get_hdr_value_str(req, "Authorization", auth_header, sizeof(auth_header)) != ESP_OK) {
+        request_basic_auth(req);
+        return false;
     }
 
-    if (code == 'D') {
-        WifiController::fireWifiEvent(WifiController::MYR_WIFI_EVENT_DISCONNECT, nullptr);
-        return WifiController::setDefaultMode(MYR_WIFI_MODE_AP);
+    const std::string otaPass = WifiController::getOTAPassword();
+    if (!WebServerUtils::basicAuthMatches(auth_header, MYR_OTA_AUTH_USERNAME, otaPass.c_str())) {
+        request_basic_auth(req);
+        return false;
     }
 
-    if (code == 'O') {
-        std::string old_pass;
-        std::string new_pass;
-        esp_err_t err = parse_config_pair(data, &old_pass, &new_pass);
-        if (err != ESP_OK) return err;
+    return true;
+}
 
-        WifiController::changeOTAPass(&old_pass, &new_pass);
-        return ESP_OK;
+esp_err_t post_ota_handler(httpd_req_t *req) {
+    char ota_chunk[kMaxOtaChunkLen];
+    if (!ensure_authenticated(req)) {
+        return ESP_FAIL;
     }
 
-    ESP_LOGD(TAG, "POST command '%c' ignored in IDF baseline", code);
-    return ESP_OK;
-}
-
-esp_err_t parse_motor_data(cJSON *data, Op *op) {
-    if (!cJSON_IsArray(data)) return ESP_ERR_INVALID_ARG;
-    if (cJSON_GetArraySize(data) != 4) return ESP_ERR_INVALID_ARG;
-
-    cJSON *motorIdItem = cJSON_GetArrayItem(data, 0);
-    cJSON *queueItem = cJSON_GetArrayItem(data, 1);
-    cJSON *stepNumItem = cJSON_GetArrayItem(data, 2);
-    cJSON *stepRateItem = cJSON_GetArrayItem(data, 3);
-    if (!cJSON_IsNumber(motorIdItem)) return ESP_ERR_INVALID_ARG;
-    if (!cJSON_IsNumber(queueItem)) return ESP_ERR_INVALID_ARG;
-    if (!cJSON_IsNumber(stepNumItem)) return ESP_ERR_INVALID_ARG;
-    if (!cJSON_IsNumber(stepRateItem)) return ESP_ERR_INVALID_ARG;
-
-    op->port = 0;
-    op->motorID = static_cast<uint8_t>(motorIdItem->valueint);
-    op->queue = static_cast<uint8_t>(queueItem->valueint);
-    op->stepNum = static_cast<int32_t>(stepNumItem->valueint);
-    op->stepRate = static_cast<uint16_t>(stepRateItem->valueint);
-    return ESP_OK;
-}
-
-esp_err_t enqueue_motor_op(const Op *op) {
-    OpBuffer *buffer = OpBuffer::getInstance();
-
-    if (op->queue == 0) {
-        buffer->clear(op->motorID);
-        buffer->killCurrentOp(op->motorID);
+    const esp_partition_t *update_partition = esp_ota_get_next_update_partition(nullptr);
+    if (update_partition == nullptr) {
+        ESP_LOGE(TAG, "Failed to find OTA update partition");
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
     }
 
-    Op opCopy = *op;
-    if (buffer->storeOp(&opCopy) < 0) return ESP_FAIL;
-    return ESP_OK;
-}
-
-esp_err_t handle_motor_motion_command(char code, cJSON *data) {
-    Op op = {};
-    esp_err_t err = parse_motor_data(data, &op);
-    if (err != ESP_OK) return err;
-
-    op.opcode = code;
-    return enqueue_motor_op(&op);
-}
-
-esp_err_t handle_motor_config_command(char code, cJSON *data) {
-    Op op = {};
-    esp_err_t err = parse_motor_data(data, &op);
-    if (err != ESP_OK) return err;
-
-    op.opcode = code;
-    // Preserve legacy payload mapping for motor config commands.
-    op.stepNum = 0;
-    return enqueue_motor_op(&op);
-}
-
-esp_err_t process_command_payload(const char *payload) {
-    cJSON *root = cJSON_Parse(payload);
-    if (root == nullptr) return ESP_ERR_INVALID_ARG;
-
-    cJSON *commands = cJSON_GetObjectItemCaseSensitive(root, "commands");
-    if (!cJSON_IsArray(commands)) {
-        cJSON_Delete(root);
-        return ESP_ERR_INVALID_ARG;
+    esp_ota_handle_t ota_handle;
+    esp_err_t err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &ota_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_begin failed (%s)", esp_err_to_name(err));
+        httpd_resp_send_500(req);
+        return err;
     }
 
-    esp_err_t err = ESP_OK;
-    cJSON *command = nullptr;
-    cJSON_ArrayForEach(command, commands) {
-        cJSON *code = cJSON_GetObjectItemCaseSensitive(command, "code");
-        cJSON *data = cJSON_GetObjectItemCaseSensitive(command, "data");
-
-        if (!cJSON_IsString(code) || code->valuestring == nullptr) {
-            err = ESP_ERR_INVALID_ARG;
-            break;
-        }
-        if (strlen(code->valuestring) != 1) {
-            err = ESP_ERR_INVALID_ARG;
-            break;
+    int remaining = req->content_len;
+    while (remaining > 0) {
+        int to_read = MIN(remaining, static_cast<int>(sizeof(ota_chunk)));
+        int read = httpd_req_recv(req, ota_chunk, to_read);
+        if (read <= 0) {
+            if (read == HTTPD_SOCK_ERR_TIMEOUT) {
+                continue;
+            }
+            esp_ota_abort(ota_handle);
+            ESP_LOGE(TAG, "Failed to receive OTA chunk");
+            httpd_resp_send_500(req);
+            return ESP_FAIL;
         }
 
-        char opcode = code->valuestring[0];
-        if (opcode == 'C' || opcode == 'D' || opcode == 'O') {
-            err = handle_config_command(opcode, data);
-        } else if (opcode == 'M' || opcode == 'S' || opcode == 'G' || opcode == 'I') {
-            err = handle_motor_motion_command(opcode, data);
-        } else if (opcode == 'U' || opcode == 'H' || opcode == 'L') {
-            err = handle_motor_config_command(opcode, data);
-        } else {
-            ESP_LOGD(TAG, "POST command '%c' ignored", opcode);
-            err = ESP_OK;
+        err = esp_ota_write(ota_handle, ota_chunk, read);
+        if (err != ESP_OK) {
+            esp_ota_abort(ota_handle);
+            ESP_LOGE(TAG, "esp_ota_write failed (%s)", esp_err_to_name(err));
+            httpd_resp_send_500(req);
+            return err;
         }
-        if (err != ESP_OK) break;
+        remaining -= read;
     }
 
-    cJSON_Delete(root);
-    return err;
+    if (esp_ota_end(ota_handle) != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_end failed");
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    err = esp_ota_set_boot_partition(update_partition);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_set_boot_partition failed (%s)", esp_err_to_name(err));
+        httpd_resp_send_500(req);
+        return err;
+    }
+
+    httpd_resp_sendstr(req, "OTA complete, rebooting...");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return ESP_OK;
 }
 
 esp_err_t get_health_handler(httpd_req_t *req) {
@@ -334,7 +269,7 @@ esp_err_t post_command_handler(httpd_req_t *req) {
         return httpd_resp_sendstr(req, "Bad Request");
     }
 
-    err = process_command_payload(payload);
+    err = WebCommandDispatcher::processPayload(payload);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "POST %s -> 400 (%s)", req->uri, esp_err_to_name(err));
         httpd_resp_set_status(req, "400 Bad Request");
@@ -403,6 +338,19 @@ bool WebServer::init() {
         return false;
     }
     ESP_LOGD(TAG, "Registered route: GET /*");
+
+    httpd_uri_t ota_uri = {};
+    ota_uri.uri = "/ota";
+    ota_uri.method = HTTP_POST;
+    ota_uri.handler = post_ota_handler;
+    ota_uri.user_ctx = nullptr;
+    err = httpd_register_uri_handler(g_server, &ota_uri);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "register POST /ota failed: %s", esp_err_to_name(err));
+        reset();
+        return false;
+    }
+    ESP_LOGD(TAG, "Registered route: POST /ota (Basic auth)");
 
     ESP_LOGI(TAG, "HTTP static root: %s", kWebRoot);
     ESP_LOGI(TAG, "HTTP server started");

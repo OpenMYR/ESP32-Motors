@@ -1,12 +1,14 @@
 idf_component_register(
     SRCS
         "app_main_idf.cpp"
+        "../lib/protocols/WebServerUtils.cpp"
         "../lib/WiFi/WifiController.cpp"
         "../lib/generic/Lookup.cpp"
         "../lib/generic/FileIO.cpp"
         "../lib/Op/OpBuffer.cpp"
         "../lib/middleware/CommandLayer.cpp"
         "../lib/IoDrivers/StepperDriver.cpp"
+        "../lib/protocols/WebCommandDispatcher.cpp"
         "../lib/protocols/WebServer.cpp"
     INCLUDE_DIRS
         "../include"
@@ -26,4 +28,6 @@ idf_component_register(
         json
         driver
         esp_timer
+        app_update
+        mbedtls
 )

@@ -42,6 +42,7 @@ class WifiController {
     static esp_err_t setDefaultStaCredentials(const std::string *ssid, const std::string *pass);
     static esp_err_t setDefaultMode(uint8_t mode);
     static void changeOTAPass(const std::string *oldPass, const std::string *pass);
+    static std::string getOTAPassword();
     static myr_wifi_state_t getWiFiState();
 
     // Test-helper: pumps the WifiController state event loop to process
@@ -55,6 +56,7 @@ class WifiController {
     static constexpr const char *MYR_WIFI_PREF_TAG_STA_PASS = "WiFi StaPass";
     static constexpr const char *MYR_WIFI_PREF_TAG_AP_SSID = "WiFi ApSsid";
     static constexpr const char *MYR_WIFI_PREF_TAG_AP_PASS = "WiFi ApPass";
+    static constexpr const char *MYR_WIFI_PREF_TAG_OTA_PASS = "WiFi OtaPass";
 
 private:
     static void initMode(uint8_t mode);

@@ -53,4 +53,9 @@
 #define MYR_WIFI_STA_RETRY_INTERVAL_LONG 15000 // Time in ms between attempts, after the AP is up
 /* #endregion */
 
+/* OTA HTTP auth defaults */
+#define MYR_OTA_AUTH_USERNAME "admin"
+#define MYR_OTA_AUTH_REALM "ESP32 OTA"
+#define MYR_OTA_DEFAULT_PASSWORD "ota_password"
+
 #endif // MYR_SELECTED_CONFIG_H
