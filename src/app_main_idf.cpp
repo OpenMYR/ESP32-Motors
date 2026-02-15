@@ -4,6 +4,7 @@
 #include "WifiController.h"
 #include "OpBuffer.h"
 #include "CommandLayer.h"
+#include "Version.h"
 
 #include "esp_err.h"
 #include "esp_log.h"
@@ -55,6 +56,9 @@ extern "C" void __attribute__((weak)) app_main(void) {
         ESP_LOGI(TAG, "OTA image pending verification; deferring validation for 10s");
     }
 
+    const auto version = get_app_version();
+    ESP_LOGI(TAG, "App version %s (major=%u minor=%u patch=%u)", version.string_repr,
+             version.major, version.minor, version.patch);
     ESP_LOGI(TAG, "IDF baseline started");
     while (true) {
         if (s_ota_pending_verify && esp_timer_get_time() >= s_ota_deadline_us) {
