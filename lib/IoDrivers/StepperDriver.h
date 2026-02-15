@@ -8,8 +8,6 @@
 
 #include <stdint.h>
 
-#include <driver/pulse_cnt.h>
-
 #include "MotorDriver.h"
 #include "Op.h"
 #include "CommandLayer.h"
@@ -31,7 +29,8 @@ public:
 
     static MotionPlan planRelativeMove(int32_t currentStep, int32_t deltaStep, uint16_t stepRate);
     static MotionPlan planAbsoluteMove(int32_t currentStep, int32_t targetStep, uint16_t stepRate);
-    static uint64_t planDwellDurationUs(int32_t waitCycles, uint16_t precisionMs);
+    static uint64_t planDwellDurationUs(int32_t waitCycles, uint16_t precisionUs);
+    static bool shouldRejectForEndstop(char opcode, bool endstopTripped);
 
     /** @brief Create the singleton and initialize GPIO. */
     StepperDriver();
@@ -57,7 +56,7 @@ public:
     /**
      * @brief Move a motor by a relative delta.
      */
-    void motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorID);
+    void motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID);
 
     /**
      * @brief Pause the motor for the provided wait cycles.
@@ -99,22 +98,20 @@ private:
     static void IRAM_ATTR isrIoStep(void *);
     void driver();
 
+    static void IRAM_ATTR onPulseRunComplete(uint32_t pulsesCompleted, void *userCtx);
+    void applyPulseProgress(uint32_t pulsesCompleted);
+
     static StepperDriver *instance;
     CommandLayer *commandInstance;
     TaskHandle_t motorTaskHandle;
     static void IRAM_ATTR endstop_a_interrupt(void *);
     static void IRAM_ATTR endstop_b_interrupt(void *);
-    static void setStepRate(int32_t rate);
     static void setSleep(bool sleep);
     static void addSteps(uint32_t steps);
     static void addSteps(uint32_t steps, uint16_t microstepRate);
     static uint16_t getMicroStepRate();
     static void setMicroStepRate(uint16_t microstepRate);
     static void setMicroStepRate(bool MS1, bool MS2, bool MS3);
-        void checkLocation();
-
-    static void pcnt_setup_init(uint8_t pin);
-    static bool IRAM_ATTR pcnt_watch_handler(pcnt_unit_handle_t unit, const pcnt_watch_event_data_t *edata, void *user_ctx);
 
     struct stepper_conf
     {

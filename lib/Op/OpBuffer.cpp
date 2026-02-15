@@ -58,10 +58,15 @@ Op *OpBuffer::getOp(uint8_t id) {
     if (!validIndex(id)) return nullptr;
 
     Op *tempOp = nullptr;
-    if (gLength[id] > 0) {
-        tempOp = &opQueue[id][gHead[id]];
-        gHead[id] = (gHead[id] + 1) % OP_BUFFER_SIZE;
-        gLength[id]--;
+    if (xSemaphoreTake(gMutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+        if (gLength[id] > 0) {
+            tempOp = &opQueue[id][gHead[id]];
+            gHead[id] = (gHead[id] + 1) % OP_BUFFER_SIZE;
+            gLength[id]--;
+        }
+        xSemaphoreGive(gMutex);
+    } else {
+        ESP_LOGE(TAG, "getOp failed: mutex timeout");
     }
 
     return tempOp;
@@ -71,8 +76,13 @@ Op *OpBuffer::peekOp(uint8_t id) {
     if (!validIndex(id)) return nullptr;
 
     Op *tempOp = nullptr;
-    if (gLength[id] > 0) {
-        tempOp = &opQueue[id][gHead[id]];
+    if (xSemaphoreTake(gMutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+        if (gLength[id] > 0) {
+            tempOp = &opQueue[id][gHead[id]];
+        }
+        xSemaphoreGive(gMutex);
+    } else {
+        ESP_LOGE(TAG, "peekOp failed: mutex timeout");
     }
 
     return tempOp;
@@ -105,7 +115,14 @@ void OpBuffer::killCurrentOp(uint8_t id) {
 bool OpBuffer::isEmpty(uint8_t id) {
     if (!validIndex(id)) return true;
 
-    return gLength[id] == 0;
+    bool isBufferEmpty = true;
+    if (xSemaphoreTake(gMutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+        isBufferEmpty = gLength[id] == 0;
+        xSemaphoreGive(gMutex);
+    } else {
+        ESP_LOGE(TAG, "isEmpty failed: mutex timeout");
+    }
+    return isBufferEmpty;
 }
 
 bool OpBuffer::isFull(uint8_t id) {

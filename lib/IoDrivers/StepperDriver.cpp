@@ -6,14 +6,13 @@
 #include <math.h>
 #include <string.h>
 
-#include <driver/ledc.h>
 #include <driver/gpio.h>
-#include <driver/pulse_cnt.h>
 #include <esp_attr.h>
 #include <esp_err.h>
 #include <esp_log.h>
 #include <esp_timer.h>
 
+#include "PulseEngine.h"
 #include "StepperDriver.h"
 #include "OpBuffer.h"
 
@@ -26,14 +25,6 @@
 
 namespace {
 const char *TAG = "StepperDriver";
-constexpr ledc_mode_t kStepLedsMode = LEDC_HIGH_SPEED_MODE;
-constexpr ledc_timer_t kStepLedsTimer = LEDC_TIMER_0;
-constexpr ledc_channel_t kStepLedsChannel = LEDC_CHANNEL_0;
-constexpr ledc_timer_bit_t kStepLedsResolution = LEDC_TIMER_10_BIT;
-constexpr uint32_t kStepLedsDuty = 512;
-constexpr uint32_t kStepLedsClkSrc = LEDC_AUTO_CLK;
-constexpr uint64_t kMicrosecondsPerMillisecond = 1000ULL;
-bool gStepPwmInitialized = false;
 bool gGpioIsrServiceInstalled = false;
 constexpr uint32_t kCommandTimingMarginUs = 100;
 
@@ -59,10 +50,6 @@ static uint8_t peekRate = 5;
 #define GPIO_IO_B 22
 #define MYR_DEFAULT_DEBOUNCE_MS 10 // TODO: NVS config
 
-#define PCNT_H_LIM_VAL 100
-#define PCNT_L_LIM_VAL -100
-#define PCNT_THRESH1_VAL 1
-
 bool const positiveDirection = true;
 uint32_t direction = 0;
 uint32_t DRAM_ATTR paused = 0;
@@ -86,9 +73,6 @@ uint32_t DRAM_ATTR volatile     debounceTimeoutEndstopBIsr  = 0;
 uint16_t stepsPerRev = 200;
 uint16_t mircoSteps = 1;
 int32_t DRAM_ATTR location = 0;
-pcnt_unit_handle_t sStepPulseCountUnit = nullptr;
-pcnt_channel_handle_t sStepPulseCountChannel = nullptr;
-bool sStepPulseCountInitialized = false;
 
 /**
  * @brief Construct the stepper driver, initialize GPIO, and reset the pending command state.
@@ -144,10 +128,15 @@ StepperDriver::MotionPlan StepperDriver::planAbsoluteMove(int32_t currentStep, i
     return plan;
 }
 
-uint64_t StepperDriver::planDwellDurationUs(int32_t waitCycles, uint16_t precisionMs)
+uint64_t StepperDriver::planDwellDurationUs(int32_t waitCycles, uint16_t precisionUs)
 {
     const int64_t cycles = waitCycles >= 0 ? static_cast<int64_t>(waitCycles) : -static_cast<int64_t>(waitCycles);
-    return static_cast<uint64_t>(cycles) * static_cast<uint64_t>(precisionMs) * kMicrosecondsPerMillisecond;
+    return static_cast<uint64_t>(cycles) * static_cast<uint64_t>(precisionUs);
+}
+
+bool StepperDriver::shouldRejectForEndstop(char opcode, bool endstopTripped)
+{
+    return endstopTripped && (opcode == 'M' || opcode == 'G');
 }
 
 /**
@@ -205,6 +194,9 @@ void StepperDriver::initMotorGpio()
     gpio_set_level(static_cast<gpio_num_t>(GPIO_USTEP_MS3), 0);
     gpio_set_level(static_cast<gpio_num_t>(GPIO_STEP_DIR), 0);
 
+    ESP_ERROR_CHECK_WITHOUT_ABORT(PulseEngine::init(static_cast<gpio_num_t>(GPIO_STEP)));
+    PulseEngine::registerCompletionCallback(&StepperDriver::onPulseRunComplete, this);
+
     endstop_a_interrupt(nullptr);
     endstop_b_interrupt(nullptr);
 }
@@ -221,7 +213,7 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
         return;
     motorID--;
 
-    if (isEndstopTripped())
+    if (shouldRejectForEndstop('G', isEndstopTripped()))
     {
         return;
     }
@@ -255,7 +247,24 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
             plan.durationUs == UINT64_MAX ? UINT64_MAX : startTime[motorID] + plan.durationUs + kCommandTimingMarginUs;
         commandDone[motorID] = false;
 
-        setStepRate(rate);
+        PulseEngine::StartConfig pulseConfig = {};
+        pulseConfig.pulseCount = plan.steps;
+        pulseConfig.startSpeedHz = rate;
+        pulseConfig.endSpeedHz = rate;
+        esp_err_t pulseErr = PulseEngine::startPulses(pulseConfig);
+        if (pulseErr != ESP_OK)
+        {
+            commandDone[motorID] = true;
+            ESP_LOGW(
+                TAG,
+                "Pulse start failed: motor=%u steps=%u start=%u end=%u err=%s",
+                static_cast<unsigned>(motorID + 1),
+                static_cast<unsigned>(pulseConfig.pulseCount),
+                static_cast<unsigned>(pulseConfig.startSpeedHz),
+                static_cast<unsigned>(pulseConfig.endSpeedHz),
+                esp_err_to_name(pulseErr));
+            return;
+        }
         if (plan.durationUs == UINT64_MAX)
         {
             ESP_LOGI(
@@ -292,94 +301,43 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
  * @param rate Requested speed for the motion.
  * @param motorID 1-based ID of the motor to command.
  */
-void StepperDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorID)
+void StepperDriver::motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID)
 {
     if (motorID > motorsControlled)
         return;
-    motorID--;
+    if (shouldRejectForEndstop('M', isEndstopTripped())) return;
 
-    if (isEndstopTripped())
-    {
-        return;
-    }
+    const uint8_t motorIndex = motorID - 1;
+    const int32_t currentStep = static_cast<int32_t>(currentAngle[motorIndex]);
+    const int32_t goalStep = currentStep + deltaAngle;
 
-    const int32_t currentStep = static_cast<int32_t>(currentAngle[motorID]);
-    const MotionPlan plan = planRelativeMove(currentStep, targetAngle, rate);
-
-    direction = targetAngle > 0 ? positiveDirection : !positiveDirection;
-    gpio_set_level(static_cast<gpio_num_t>(GPIO_STEP_DIR), direction);
-	    
-    if(motorSleeping){
-        motorSleeping = false;
-        setSleep(motorSleeping);
-    }
-
-    motorDwell = false;
-
-    if (plan.steps > 0)
-    {
-        startAngle[motorID] = currentStep;
-        commandDeltaAngle[motorID] = plan.goalStep;
-        startTime[motorID] = esp_timer_get_time();
-        commandDeltaTime[motorID] =
-            plan.durationUs == UINT64_MAX ? UINT64_MAX : startTime[motorID] + plan.durationUs + kCommandTimingMarginUs;
-        commandDone[motorID] = false;
-
-        setStepRate(rate);
-        if (plan.durationUs == UINT64_MAX)
-        {
-            ESP_LOGI(
-                TAG,
-                "Motion plan move: motor=%u from=%ld delta=%ld to=%ld steps=%u rate=%u duration=unknown",
-                static_cast<unsigned>(motorID + 1),
-                static_cast<long>(currentStep),
-                static_cast<long>(targetAngle),
-                static_cast<long>(plan.goalStep),
-                static_cast<unsigned>(plan.steps),
-                static_cast<unsigned>(rate));
-        }
-        else
-        {
-            ESP_LOGI(
-                TAG,
-                "Motion plan move: motor=%u from=%ld delta=%ld to=%ld steps=%u rate=%u duration_ms=%llu",
-                static_cast<unsigned>(motorID + 1),
-                static_cast<long>(currentStep),
-                static_cast<long>(targetAngle),
-                static_cast<long>(plan.goalStep),
-                static_cast<unsigned>(plan.steps),
-                static_cast<unsigned>(rate),
-                static_cast<unsigned long long>(plan.durationUs / 1000ULL));
-        }
-    }
-    else
-    {
-        commandDone[motorID] = true;
-    }
+    // Keep a single execution path for motion scheduling/timing by routing relative moves through goto.
+    motorGoTo(goalStep, rate, motorID);
 }
 
 /**
  * @brief Hold the motor in place for a number of wait cycles before resuming.
  * @param wait_time Number of cycles to wait.
- * @param precision Duration of each wait cycle in milliseconds.
+ * @param precision Duration of each wait cycle in microseconds.
  * @param motorID 1-based ID of the motor to command.
  */
 void StepperDriver::motorStop(int32_t wait_time, uint16_t precision, uint8_t motorID)
 {
     // wait_time, cycles to wait
-    // precision, duration of wait cycle in milliseconds
+    // precision, duration of wait cycle in microseconds
     if (motorID > motorsControlled)
         return;
     motorID--;
 
-    if (isEndstopTripped())
+    if (shouldRejectForEndstop('S', isEndstopTripped()))
     {
         return;
     }
 
     motorDwell = true;
     startTime[motorID] = esp_timer_get_time();
-    commandDeltaTime[motorID] = startTime[motorID] + planDwellDurationUs(wait_time, precision);
+    const uint64_t dwellDurationUs = planDwellDurationUs(wait_time, precision);
+    commandDeltaTime[motorID] = startTime[motorID] + dwellDurationUs;
     commandDone[motorID] = false;
     
     if(motorSleeping){
@@ -387,39 +345,60 @@ void StepperDriver::motorStop(int32_t wait_time, uint16_t precision, uint8_t mot
         setSleep(motorSleeping);
     }
 	
-    setStepRate(0);
+    PulseEngine::stop();
+
+    // #region FIXME(STEPPER-DWELL-DEBUG): Temporary dwell timing diagnostics for sleep/stop investigation; remove or slim after root cause is validated on hardware.
+    ESP_LOGI(
+        TAG,
+        "Dwell plan stop: motor=%u wait=%ld precision=%u duration_ms=%llu",
+        static_cast<unsigned>(motorID + 1),
+        static_cast<long>(wait_time),
+        static_cast<unsigned>(precision),
+        static_cast<unsigned long long>(dwellDurationUs / 1000ULL));
 
     ESP_LOGD(TAG, "command %d %d %d %d ", startAngle[motorID], commandDeltaAngle[motorID], startTime[motorID], commandDeltaTime[motorID]);
+    // #endregion FIXME(STEPPER-DWELL-DEBUG)
 }
 
 /**
  * @brief Hold the motor, then transition the driver into sleep mode after the wait period.
  * @param wait_time Number of cycles to wait.
- * @param precision Duration of each wait cycle in milliseconds.
+ * @param precision Duration of each wait cycle in microseconds.
  * @param motorID 1-based ID of the motor to command.
  */
 void StepperDriver::motorSleep(int32_t wait_time, uint16_t precision, uint8_t motorID)
 {
     // wait_time, cycles to wait
-    // precision, duration of wait cycle in milliseconds
+    // precision, duration of wait cycle in microseconds
     if (motorID > motorsControlled)
         return;
     motorID--;
 
-    if (isEndstopTripped())
+    if (shouldRejectForEndstop('I', isEndstopTripped()))
     {
         return;
     }
 
     motorDwell = true;
     startTime[motorID] = esp_timer_get_time();
-    commandDeltaTime[motorID] = startTime[motorID] + planDwellDurationUs(wait_time, precision);
+    const uint64_t dwellDurationUs = planDwellDurationUs(wait_time, precision);
+    commandDeltaTime[motorID] = startTime[motorID] + dwellDurationUs;
     commandDone[motorID] = false;
 
     motorSleeping = true;
     setSleep(motorSleeping);
 
+    // #region FIXME(STEPPER-DWELL-DEBUG): Temporary dwell timing diagnostics for sleep/stop investigation; remove or slim after root cause is validated on hardware.
+    ESP_LOGI(
+        TAG,
+        "Dwell plan sleep: motor=%u wait=%ld precision=%u duration_ms=%llu",
+        static_cast<unsigned>(motorID + 1),
+        static_cast<long>(wait_time),
+        static_cast<unsigned>(precision),
+        static_cast<unsigned long long>(dwellDurationUs / 1000ULL));
+
     ESP_LOGD(TAG, "command %d %d %d %d ", startAngle[motorID], commandDeltaAngle[motorID], startTime[motorID], commandDeltaTime[motorID]);
+    // #endregion FIXME(STEPPER-DWELL-DEBUG)
 }
 
 /**
@@ -432,7 +411,7 @@ void StepperDriver::abortCommand(uint8_t motorID)
         return;
     motorID--;
 
-    setStepRate(0);
+    applyPulseProgress(PulseEngine::stop());
     commandDone[motorID] = true;
 }
 
@@ -562,7 +541,7 @@ bool IRAM_ATTR StepperDriver::isEndstopTripped()
  */
 void StepperDriver::isrStopIoDriver()
 {
-    setStepRate(0); // TODO: clean me
+    applyPulseProgress(PulseEngine::stop());
 }
 
 /**
@@ -572,99 +551,24 @@ void StepperDriver::isrStopIoDriver()
 void StepperDriver::isrIoStep(void *pvParameters)
 {
     (void)pvParameters;
-    pcnt_setup_init(GPIO_STEP);
     StepperDriver::getInstance()->driver();
 }
 
-/**
- * @brief Compare the tracked position against the current command and stop when the target is reached.
- */
-void StepperDriver::checkLocation()
+void IRAM_ATTR StepperDriver::onPulseRunComplete(uint32_t pulsesCompleted, void *userCtx)
 {
+    StepperDriver *driver = static_cast<StepperDriver *>(userCtx);
+    if (driver == nullptr) return;
+
+    driver->applyPulseProgress(pulsesCompleted);
+    driver->commandDone[0] = true;
+}
+
+void StepperDriver::applyPulseProgress(uint32_t pulsesCompleted)
+{
+    const int32_t startStep = static_cast<int32_t>(startAngle[0]);
+    const int32_t signedDelta = direction == positiveDirection ? static_cast<int32_t>(pulsesCompleted) : -static_cast<int32_t>(pulsesCompleted);
+    location = startStep + signedDelta;
     currentAngle[0] = location;
-    if (currentAngle[0] == commandDeltaAngle[0])
-    {
-        setStepRate(0);
-        commandDone[0] = true;
-    }
-    else if (isEndstopTripped())
-    {
-        setStepRate(0);
-        commandDone[0] = true;
-    }
-}
-
-/**
- * @brief Pulse counter watch callback: apply one logical step and reevaluate command completion.
- * @param unit Pulse counter unit that generated the event.
- * @param edata Event data that includes the reached watch point.
- * @param user_ctx User context provided during callback registration (unused).
- * @return False because this callback does not wake a higher-priority task.
- */
-bool IRAM_ATTR StepperDriver::pcnt_watch_handler(pcnt_unit_handle_t unit, const pcnt_watch_event_data_t *edata, void *user_ctx)
-{
-    (void)unit;
-    (void)edata;
-    (void)user_ctx;
-
-    if (direction == positiveDirection)
-    {
-        location++;
-    }
-    else
-    {
-        location--;
-    }
-
-    pcnt_unit_clear_count(sStepPulseCountUnit);
-    instance->checkLocation();
-    return false;
-}
-
-/**
- * @brief Configure the pulse counter hardware for the step pin and enable watch callbacks.
- * @param pin GPIO pin that supplies the step pulses.
- */
-void StepperDriver::pcnt_setup_init(uint8_t pin)
-{
-    if (sStepPulseCountInitialized) return;
-
-    pcnt_unit_config_t unitConfig = {};
-    unitConfig.low_limit = PCNT_L_LIM_VAL;
-    unitConfig.high_limit = PCNT_H_LIM_VAL;
-    unitConfig.intr_priority = 0;
-    unitConfig.flags.accum_count = 0;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_new_unit(&unitConfig, &sStepPulseCountUnit));
-
-    pcnt_chan_config_t channelConfig = {};
-    channelConfig.edge_gpio_num = pin;
-    channelConfig.level_gpio_num = -1;
-    channelConfig.flags.invert_edge_input = 0;
-    channelConfig.flags.invert_level_input = 0;
-    channelConfig.flags.virt_edge_io_level = 0;
-    channelConfig.flags.virt_level_io_level = 0;
-    channelConfig.flags.io_loop_back = 0;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_new_channel(sStepPulseCountUnit, &channelConfig, &sStepPulseCountChannel));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_channel_set_edge_action(
-        sStepPulseCountChannel,
-        PCNT_CHANNEL_EDGE_ACTION_INCREASE,
-        PCNT_CHANNEL_EDGE_ACTION_HOLD));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_channel_set_level_action(
-        sStepPulseCountChannel,
-        PCNT_CHANNEL_LEVEL_ACTION_KEEP,
-        PCNT_CHANNEL_LEVEL_ACTION_KEEP));
-
-    pcnt_event_callbacks_t callbacks = {};
-    callbacks.on_reach = pcnt_watch_handler;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_register_event_callbacks(sStepPulseCountUnit, &callbacks, nullptr));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_add_watch_point(sStepPulseCountUnit, PCNT_THRESH1_VAL));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_set_glitch_filter(sStepPulseCountUnit, nullptr));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_enable(sStepPulseCountUnit));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_clear_count(sStepPulseCountUnit));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(pcnt_unit_start(sStepPulseCountUnit));
-
-    sStepPulseCountInitialized = true;
-    ESP_LOGI(TAG, "Pulse counter initialized: step_pin=%u", pin);
 }
 
 /**
@@ -698,14 +602,30 @@ void IRAM_ATTR StepperDriver::driver()
         {
             if (!commandDone[i])
             {
+                PulseEngine::service();
+
+                if (!motorDwell && isEndstopTripped())
+                {
+                    applyPulseProgress(PulseEngine::stop());
+                    commandDone[i] = true;
+                    ESP_LOGW(TAG, "Command: Stopped by endstop");
+                    continue;
+                }
+
                 if (esp_timer_get_time() >= commandDeltaTime[i])
                 {
                     if (motorDwell)
                     {
-                        // No issue
+                        // FIXME(STEPPER-DWELL-DEBUG): Temporary completion trace for dwell timing investigation; remove or slim after root cause is validated on hardware.
+                        ESP_LOGI(
+                            TAG,
+                            "Dwell complete: motor=%u elapsed_ms=%llu",
+                            static_cast<unsigned>(i + 1),
+                            static_cast<unsigned long long>((esp_timer_get_time() - startTime[i]) / 1000ULL));
                     }
                     else
                     {
+                        applyPulseProgress(PulseEngine::stop());
                         ESP_LOGE(TAG, "Command: Timed out");
                         ESP_LOGE(
                             TAG,
@@ -773,74 +693,12 @@ void StepperDriver::changeMotorSettings(config_setting setting, uint32_t data1, 
 }
 
 /**
- * @brief Configure or disable the PWM driving the step pin based on the desired rate.
- * @param rate Frequency to apply to the step pin; zero disables the PWM.
- */
-void StepperDriver::setStepRate(int32_t rate)
-{
-    if (abs(rate) == 0) {
-        if (gStepPwmInitialized) {
-            ledc_stop(kStepLedsMode, kStepLedsChannel, 0);
-            gStepPwmInitialized = false;
-        }
-        gpio_set_level(static_cast<gpio_num_t>(GPIO_STEP), 0);
-        return;
-    }
-
-    if (!gStepPwmInitialized) {
-        ledc_timer_config_t timerConfig = {};
-        timerConfig.speed_mode = kStepLedsMode;
-        timerConfig.timer_num = kStepLedsTimer;
-        timerConfig.duty_resolution = kStepLedsResolution;
-        timerConfig.freq_hz = static_cast<uint32_t>(abs(rate));
-        timerConfig.clk_cfg = static_cast<ledc_clk_cfg_t>(kStepLedsClkSrc);
-        esp_err_t timerErr = ledc_timer_config(&timerConfig);
-        ESP_ERROR_CHECK_WITHOUT_ABORT(timerErr);
-        if (timerErr != ESP_OK) {
-            ESP_LOGW(TAG, "setStepRate timer config failed: rate=%ld err=%s", static_cast<long>(rate), esp_err_to_name(timerErr));
-            return;
-        }
-
-        ledc_channel_config_t channelConfig = {};
-        channelConfig.gpio_num = GPIO_STEP;
-        channelConfig.speed_mode = kStepLedsMode;
-        channelConfig.channel = kStepLedsChannel;
-        channelConfig.intr_type = LEDC_INTR_DISABLE;
-        channelConfig.timer_sel = kStepLedsTimer;
-        channelConfig.duty = kStepLedsDuty;
-        channelConfig.hpoint = 0;
-        channelConfig.flags.output_invert = 0;
-        esp_err_t channelErr = ledc_channel_config(&channelConfig);
-        ESP_ERROR_CHECK_WITHOUT_ABORT(channelErr);
-        if (channelErr != ESP_OK) {
-            ESP_LOGW(TAG, "setStepRate channel config failed: gpio=%u rate=%ld err=%s", static_cast<unsigned>(GPIO_STEP), static_cast<long>(rate), esp_err_to_name(channelErr));
-            return;
-        }
-
-        gStepPwmInitialized = true;
-    } else {
-        uint32_t setFreqResult = ledc_set_freq(kStepLedsMode, kStepLedsTimer, static_cast<uint32_t>(abs(rate)));
-        if (setFreqResult == 0) {
-            ESP_LOGW(TAG, "setStepRate frequency update returned 0: rate=%ld", static_cast<long>(rate));
-        }
-        esp_err_t dutyErr = ledc_set_duty(kStepLedsMode, kStepLedsChannel, kStepLedsDuty);
-        if (dutyErr != ESP_OK) {
-            ESP_LOGW(TAG, "setStepRate set_duty failed: rate=%ld err=%s", static_cast<long>(rate), esp_err_to_name(dutyErr));
-        }
-        esp_err_t updateErr = ledc_update_duty(kStepLedsMode, kStepLedsChannel);
-        if (updateErr != ESP_OK) {
-            ESP_LOGW(TAG, "setStepRate update_duty failed: rate=%ld err=%s", static_cast<long>(rate), esp_err_to_name(updateErr));
-        }
-    }
-}
-
-/**
  * @brief Toggle the sleep line on the driver, ensuring stepping is disabled first.
  * @param sleep True to assert sleep (disable driver), false to wake.
  */
 void StepperDriver::setSleep(bool sleep)
 {
-    setStepRate(0);
+    PulseEngine::stop();
 
     if(sleep){
         gpio_set_level(static_cast<gpio_num_t>(GPIO_STEP_ENABLE), 1);

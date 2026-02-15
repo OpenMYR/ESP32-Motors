@@ -11,6 +11,13 @@ static void assert_uint64_equal(uint64_t expected, uint64_t actual, const char *
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(static_cast<uint32_t>(expected), static_cast<uint32_t>(actual), message);
 }
 
+static void assert_motion_plan_equal(const StepperDriver::MotionPlan &expected, const StepperDriver::MotionPlan &actual, const char *message)
+{
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(expected.goalStep, actual.goalStep, message);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(expected.steps, actual.steps, message);
+    assert_uint64_equal(expected.durationUs, actual.durationUs, message);
+}
+
 static void wait_for_monitor_attach(void)
 {
     // Keep a short bootstrap window so hardware CI serial monitor reliably attaches before Unity output starts.
@@ -68,16 +75,75 @@ void test_plan_move_with_zero_steps_has_zero_duration(void)
     assert_uint64_equal(0, plan.durationUs, "zero-step duration");
 }
 
-void test_plan_dwell_duration_uses_millisecond_precision(void)
+void test_plan_relative_move_matches_absolute_path(void)
 {
-    const uint64_t duration = StepperDriver::planDwellDurationUs(5, 200);
-    assert_uint64_equal(1000000ULL, duration, "dwell duration from ms precision");
+    const int32_t current = 150;
+    const int32_t delta = -75;
+    const int32_t target = current + delta;
+    const uint16_t rate = 50;
+
+    const StepperDriver::MotionPlan relativePlan = StepperDriver::planRelativeMove(current, delta, rate);
+    const StepperDriver::MotionPlan absolutePlan = StepperDriver::planAbsoluteMove(current, target, rate);
+
+    assert_motion_plan_equal(absolutePlan, relativePlan, "relative plan should match absolute target path");
+}
+
+void test_plan_relative_zero_delta_matches_absolute_path(void)
+{
+    const int32_t current = 42;
+    const int32_t delta = 0;
+    const int32_t target = current + delta;
+    const uint16_t rate = 100;
+
+    const StepperDriver::MotionPlan relativePlan = StepperDriver::planRelativeMove(current, delta, rate);
+    const StepperDriver::MotionPlan absolutePlan = StepperDriver::planAbsoluteMove(current, target, rate);
+
+    assert_motion_plan_equal(absolutePlan, relativePlan, "zero-delta relative plan should match absolute path");
+}
+
+void test_plan_relative_zero_delta_zero_rate_stays_zero_duration(void)
+{
+    const int32_t current = -8;
+    const int32_t delta = 0;
+    const int32_t target = current + delta;
+    const uint16_t rate = 0;
+
+    const StepperDriver::MotionPlan relativePlan = StepperDriver::planRelativeMove(current, delta, rate);
+    const StepperDriver::MotionPlan absolutePlan = StepperDriver::planAbsoluteMove(current, target, rate);
+
+    assert_motion_plan_equal(absolutePlan, relativePlan, "zero-delta at zero-rate should stay zero-duration");
+}
+
+void test_plan_dwell_duration_uses_microsecond_precision(void)
+{
+    const uint64_t duration = StepperDriver::planDwellDurationUs(5000, 1000);
+    assert_uint64_equal(5000000ULL, duration, "dwell duration from us precision");
 }
 
 void test_plan_dwell_duration_handles_negative_wait_cycles(void)
 {
-    const uint64_t duration = StepperDriver::planDwellDurationUs(-2, 125);
-    assert_uint64_equal(250000ULL, duration, "negative dwell cycles");
+    const uint64_t duration = StepperDriver::planDwellDurationUs(-2, 1250);
+    assert_uint64_equal(2500ULL, duration, "negative dwell cycles");
+}
+
+void test_endstop_policy_blocks_motion_commands_when_tripped(void)
+{
+    TEST_ASSERT_TRUE(StepperDriver::shouldRejectForEndstop('M', true));
+    TEST_ASSERT_TRUE(StepperDriver::shouldRejectForEndstop('G', true));
+}
+
+void test_endstop_policy_allows_dwell_commands_when_tripped(void)
+{
+    TEST_ASSERT_FALSE(StepperDriver::shouldRejectForEndstop('S', true));
+    TEST_ASSERT_FALSE(StepperDriver::shouldRejectForEndstop('I', true));
+}
+
+void test_endstop_policy_allows_commands_when_not_tripped(void)
+{
+    TEST_ASSERT_FALSE(StepperDriver::shouldRejectForEndstop('M', false));
+    TEST_ASSERT_FALSE(StepperDriver::shouldRejectForEndstop('G', false));
+    TEST_ASSERT_FALSE(StepperDriver::shouldRejectForEndstop('S', false));
+    TEST_ASSERT_FALSE(StepperDriver::shouldRejectForEndstop('I', false));
 }
 
 extern "C" void app_main(void)
@@ -89,7 +155,13 @@ extern "C" void app_main(void)
     RUN_TEST(test_plan_absolute_move_uses_distance_for_duration);
     RUN_TEST(test_plan_move_with_zero_rate_has_unknown_duration);
     RUN_TEST(test_plan_move_with_zero_steps_has_zero_duration);
-    RUN_TEST(test_plan_dwell_duration_uses_millisecond_precision);
+    RUN_TEST(test_plan_relative_move_matches_absolute_path);
+    RUN_TEST(test_plan_relative_zero_delta_matches_absolute_path);
+    RUN_TEST(test_plan_relative_zero_delta_zero_rate_stays_zero_duration);
+    RUN_TEST(test_plan_dwell_duration_uses_microsecond_precision);
     RUN_TEST(test_plan_dwell_duration_handles_negative_wait_cycles);
+    RUN_TEST(test_endstop_policy_blocks_motion_commands_when_tripped);
+    RUN_TEST(test_endstop_policy_allows_dwell_commands_when_tripped);
+    RUN_TEST(test_endstop_policy_allows_commands_when_not_tripped);
     UNITY_END();
 }
