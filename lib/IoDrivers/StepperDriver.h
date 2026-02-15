@@ -29,7 +29,7 @@ public:
 
     static MotionPlan planRelativeMove(int32_t currentStep, int32_t deltaStep, uint16_t stepRate);
     static MotionPlan planAbsoluteMove(int32_t currentStep, int32_t targetStep, uint16_t stepRate);
-    static uint64_t planDwellDurationUs(int32_t waitCycles, uint16_t precisionUs);
+    static uint64_t planDwellDurationUs(int32_t waitCycles, uint16_t cycleRateHz);
     static bool shouldRejectForEndstop(char opcode, bool endstopTripped);
 
     /** @brief Create the singleton and initialize GPIO. */

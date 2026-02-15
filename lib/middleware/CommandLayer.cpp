@@ -106,16 +106,6 @@ void CommandLayer::parseSubmittOp(uint8_t id, Op *op)
     (void)id;
     if (op == nullptr)
         return;
-    // #region FIXME(CMD-DISPATCH-TRACE): Temporary dispatch trace for runtime opcode-order debugging; remove or slim after queue execution path is validated on hardware.
-    ESP_LOGI(
-        TAG,
-        "Dispatch op: opcode=%c motor=%u queue=%u step_num=%ld step_rate=%u",
-        op->opcode,
-        static_cast<unsigned>(op->motorID),
-        static_cast<unsigned>(op->queue),
-        static_cast<long>(op->stepNum),
-        static_cast<unsigned>(op->stepRate));
-    // #endregion FIXME(CMD-DISPATCH-TRACE)
     //log_i("Code: %d", (int)(op->opcode));
     switch (op->opcode)
     {

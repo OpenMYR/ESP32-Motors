@@ -114,16 +114,22 @@ void test_plan_relative_zero_delta_zero_rate_stays_zero_duration(void)
     assert_motion_plan_equal(absolutePlan, relativePlan, "zero-delta at zero-rate should stay zero-duration");
 }
 
-void test_plan_dwell_duration_uses_microsecond_precision(void)
+void test_plan_dwell_duration_uses_rate_per_second(void)
 {
     const uint64_t duration = StepperDriver::planDwellDurationUs(5000, 1000);
-    assert_uint64_equal(5000000ULL, duration, "dwell duration from us precision");
+    assert_uint64_equal(5000000ULL, duration, "dwell duration from cycles per second");
 }
 
 void test_plan_dwell_duration_handles_negative_wait_cycles(void)
 {
     const uint64_t duration = StepperDriver::planDwellDurationUs(-2, 1250);
-    assert_uint64_equal(2500ULL, duration, "negative dwell cycles");
+    assert_uint64_equal(1600ULL, duration, "negative dwell cycles");
+}
+
+void test_plan_dwell_duration_matches_hz_example(void)
+{
+    const uint64_t duration = StepperDriver::planDwellDurationUs(10, 1000);
+    assert_uint64_equal(10000ULL, duration, "10 cycles at 1000Hz should be 10ms");
 }
 
 void test_endstop_policy_blocks_motion_commands_when_tripped(void)
@@ -158,8 +164,9 @@ extern "C" void app_main(void)
     RUN_TEST(test_plan_relative_move_matches_absolute_path);
     RUN_TEST(test_plan_relative_zero_delta_matches_absolute_path);
     RUN_TEST(test_plan_relative_zero_delta_zero_rate_stays_zero_duration);
-    RUN_TEST(test_plan_dwell_duration_uses_microsecond_precision);
+    RUN_TEST(test_plan_dwell_duration_uses_rate_per_second);
     RUN_TEST(test_plan_dwell_duration_handles_negative_wait_cycles);
+    RUN_TEST(test_plan_dwell_duration_matches_hz_example);
     RUN_TEST(test_endstop_policy_blocks_motion_commands_when_tripped);
     RUN_TEST(test_endstop_policy_allows_dwell_commands_when_tripped);
     RUN_TEST(test_endstop_policy_allows_commands_when_not_tripped);

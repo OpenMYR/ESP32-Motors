@@ -27,6 +27,7 @@ namespace {
 const char *TAG = "StepperDriver";
 bool gGpioIsrServiceInstalled = false;
 constexpr uint32_t kCommandTimingMarginUs = 100;
+constexpr uint64_t kMicrosecondsPerSecond = 1000000ULL;
 
 uint32_t steps_between(int32_t a, int32_t b) {
     return a >= b ? static_cast<uint32_t>(a - b) : static_cast<uint32_t>(b - a);
@@ -128,10 +129,11 @@ StepperDriver::MotionPlan StepperDriver::planAbsoluteMove(int32_t currentStep, i
     return plan;
 }
 
-uint64_t StepperDriver::planDwellDurationUs(int32_t waitCycles, uint16_t precisionUs)
+uint64_t StepperDriver::planDwellDurationUs(int32_t waitCycles, uint16_t cycleRateHz)
 {
+    if (cycleRateHz == 0) return 0;
     const int64_t cycles = waitCycles >= 0 ? static_cast<int64_t>(waitCycles) : -static_cast<int64_t>(waitCycles);
-    return static_cast<uint64_t>(cycles) * static_cast<uint64_t>(precisionUs);
+    return (static_cast<uint64_t>(cycles) * kMicrosecondsPerSecond) / static_cast<uint64_t>(cycleRateHz);
 }
 
 bool StepperDriver::shouldRejectForEndstop(char opcode, bool endstopTripped)
@@ -318,13 +320,13 @@ void StepperDriver::motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID
 /**
  * @brief Hold the motor in place for a number of wait cycles before resuming.
  * @param wait_time Number of cycles to wait.
- * @param precision Duration of each wait cycle in microseconds.
+ * @param precision Wait cycles per second.
  * @param motorID 1-based ID of the motor to command.
  */
 void StepperDriver::motorStop(int32_t wait_time, uint16_t precision, uint8_t motorID)
 {
     // wait_time, cycles to wait
-    // precision, duration of wait cycle in microseconds
+    // precision, wait cycles per second
     if (motorID > motorsControlled)
         return;
     motorID--;
@@ -347,29 +349,18 @@ void StepperDriver::motorStop(int32_t wait_time, uint16_t precision, uint8_t mot
 	
     PulseEngine::stop();
 
-    // #region FIXME(STEPPER-DWELL-DEBUG): Temporary dwell timing diagnostics for sleep/stop investigation; remove or slim after root cause is validated on hardware.
-    ESP_LOGI(
-        TAG,
-        "Dwell plan stop: motor=%u wait=%ld precision=%u duration_ms=%llu",
-        static_cast<unsigned>(motorID + 1),
-        static_cast<long>(wait_time),
-        static_cast<unsigned>(precision),
-        static_cast<unsigned long long>(dwellDurationUs / 1000ULL));
-
-    ESP_LOGD(TAG, "command %d %d %d %d ", startAngle[motorID], commandDeltaAngle[motorID], startTime[motorID], commandDeltaTime[motorID]);
-    // #endregion FIXME(STEPPER-DWELL-DEBUG)
 }
 
 /**
  * @brief Hold the motor, then transition the driver into sleep mode after the wait period.
  * @param wait_time Number of cycles to wait.
- * @param precision Duration of each wait cycle in microseconds.
+ * @param precision Wait cycles per second.
  * @param motorID 1-based ID of the motor to command.
  */
 void StepperDriver::motorSleep(int32_t wait_time, uint16_t precision, uint8_t motorID)
 {
     // wait_time, cycles to wait
-    // precision, duration of wait cycle in microseconds
+    // precision, wait cycles per second
     if (motorID > motorsControlled)
         return;
     motorID--;
@@ -388,17 +379,6 @@ void StepperDriver::motorSleep(int32_t wait_time, uint16_t precision, uint8_t mo
     motorSleeping = true;
     setSleep(motorSleeping);
 
-    // #region FIXME(STEPPER-DWELL-DEBUG): Temporary dwell timing diagnostics for sleep/stop investigation; remove or slim after root cause is validated on hardware.
-    ESP_LOGI(
-        TAG,
-        "Dwell plan sleep: motor=%u wait=%ld precision=%u duration_ms=%llu",
-        static_cast<unsigned>(motorID + 1),
-        static_cast<long>(wait_time),
-        static_cast<unsigned>(precision),
-        static_cast<unsigned long long>(dwellDurationUs / 1000ULL));
-
-    ESP_LOGD(TAG, "command %d %d %d %d ", startAngle[motorID], commandDeltaAngle[motorID], startTime[motorID], commandDeltaTime[motorID]);
-    // #endregion FIXME(STEPPER-DWELL-DEBUG)
 }
 
 /**
@@ -616,12 +596,6 @@ void IRAM_ATTR StepperDriver::driver()
                 {
                     if (motorDwell)
                     {
-                        // FIXME(STEPPER-DWELL-DEBUG): Temporary completion trace for dwell timing investigation; remove or slim after root cause is validated on hardware.
-                        ESP_LOGI(
-                            TAG,
-                            "Dwell complete: motor=%u elapsed_ms=%llu",
-                            static_cast<unsigned>(i + 1),
-                            static_cast<unsigned long long>((esp_timer_get_time() - startTime[i]) / 1000ULL));
                     }
                     else
                     {

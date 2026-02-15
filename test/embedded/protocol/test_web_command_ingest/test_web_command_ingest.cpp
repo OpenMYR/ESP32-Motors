@@ -6,7 +6,7 @@
 #include "CommandLayer.h"
 #include "OpBuffer.h"
 #include "StepperDriver.h"
-#include "WebServer.h"
+#include "WebCommandDispatcher.h"
 
 namespace {
 void assert_uint64_equal(uint64_t expected, uint64_t actual, const char *message)
@@ -138,7 +138,7 @@ void tearDown(void)
 void test_sleep_command_payload_dispatches_wait_and_precision(void)
 {
     const char *payload = "{\"commands\":[{\"code\":\"I\",\"data\":[1,1,1375,777]}]}";
-    TEST_ASSERT_EQUAL(ESP_OK, WebCommandIngest::processCommandPayload(payload));
+    TEST_ASSERT_EQUAL(ESP_OK, WebCommandDispatcher::processPayload(payload));
 
     CommandLayer::getNextOp(1);
 
@@ -154,7 +154,7 @@ void test_sleep_command_payload_dispatches_wait_and_precision(void)
 void test_sleep_command_payload_maps_to_expected_dwell_duration(void)
 {
     const char *payload = "{\"commands\":[{\"code\":\"I\",\"data\":[1,1,5000,1000]}]}";
-    TEST_ASSERT_EQUAL(ESP_OK, WebCommandIngest::processCommandPayload(payload));
+    TEST_ASSERT_EQUAL(ESP_OK, WebCommandDispatcher::processPayload(payload));
 
     CommandLayer::getNextOp(1);
 
@@ -170,7 +170,7 @@ void test_sleep_command_payload_maps_to_expected_dwell_duration(void)
 void test_stop_command_queue_zero_inserts_kill_before_dispatch(void)
 {
     const char *payload = "{\"commands\":[{\"code\":\"S\",\"data\":[1,0,250,1000]}]}";
-    TEST_ASSERT_EQUAL(ESP_OK, WebCommandIngest::processCommandPayload(payload));
+    TEST_ASSERT_EQUAL(ESP_OK, WebCommandDispatcher::processPayload(payload));
 
     // First fetch consumes injected kill op ('K') and should not dispatch to driver.
     CommandLayer::getNextOp(1);
@@ -196,7 +196,7 @@ void test_sequence_u_m_i_m_dispatch_order_is_preserved(void)
         "{\"code\":\"I\",\"data\":[1,1,5000,1000]},"
         "{\"code\":\"M\",\"data\":[1,1,100,100]}"
         "]}";
-    TEST_ASSERT_EQUAL(ESP_OK, WebCommandIngest::processCommandPayload(payload));
+    TEST_ASSERT_EQUAL(ESP_OK, WebCommandDispatcher::processPayload(payload));
 
     for (int i = 0; i < 6; ++i) {
         CommandLayer::getNextOp(1);
@@ -230,7 +230,7 @@ void test_sequence_u_m_i_m_dispatch_order_is_preserved_under_concurrent_drain(vo
         &drainTask);
     TEST_ASSERT_EQUAL(pdPASS, createOk);
 
-    TEST_ASSERT_EQUAL(ESP_OK, WebCommandIngest::processCommandPayload(payload));
+    TEST_ASSERT_EQUAL(ESP_OK, WebCommandDispatcher::processPayload(payload));
 
     for (int i = 0; i < 800 && !ctx.done; ++i) {
         vTaskDelay(pdMS_TO_TICKS(1));
