@@ -1,111 +1,148 @@
 #include "PulseEngine.h"
 
-#include <driver/ledc.h>
-#include <driver/pulse_cnt.h>
+#include <driver/gptimer.h>
+#include <driver/gpio.h>
 #include <esp_attr.h>
 #include <esp_log.h>
 
 namespace {
+enum Phase
+{
+    RISE,
+    FALL
+};
+
+constexpr uint32_t kDefaultTimerHz = 1000000;
+constexpr uint32_t kPulseHighUs = 2;
 const char *TAG = "PulseEngine";
 
-constexpr ledc_mode_t kPulseLedsMode = LEDC_HIGH_SPEED_MODE;
-constexpr ledc_timer_t kPulseLedsTimer = LEDC_TIMER_0;
-constexpr ledc_channel_t kPulseLedsChannel = LEDC_CHANNEL_0;
-constexpr ledc_timer_bit_t kPulseLedsResolution = LEDC_TIMER_10_BIT;
-constexpr uint32_t kPulseLedsDuty = 512;
-constexpr uint32_t kPulseLedsClkSrc = LEDC_AUTO_CLK;
+// #region FIXME(PULSE-GPTIMER-DEBUG): Temporary diagnostics for GPTimer init/start invalid-state failures.
+esp_err_t gLastInitErr = ESP_ERR_INVALID_STATE;
+bool gInitGpioConfigured = false;
+bool gInitTimerCreated = false;
+bool gInitCallbacksRegistered = false;
+bool gInitTimerEnabled = false;
+// #endregion FIXME(PULSE-GPTIMER-DEBUG)
 
-constexpr int kPulseHighLimit = 100;
-constexpr int kPulseLowLimit = -100;
-constexpr int kPulseWatchPoint = 1;
-
+gptimer_handle_t gTimer = nullptr;
 gpio_num_t gStepPin = GPIO_NUM_NC;
-pcnt_unit_handle_t gPulseCountUnit = nullptr;
-pcnt_channel_handle_t gPulseCountChannel = nullptr;
-bool gPwmInitialized = false;
 
-volatile bool gRunning = false;
-volatile uint32_t gTargetPulses = 0;
-volatile uint32_t gPulsesCompleted = 0;
-volatile uint32_t gSpeedSwitchPulse = 0;
-volatile bool gEndSpeedPending = false;
+volatile uint32_t gPulsesDone = 0;
+uint32_t gPulsesTotal = 0;
 
-uint32_t gStartSpeedHz = 0;
-uint32_t gEndSpeedHz = 0;
+uint32_t gTimerHz = kDefaultTimerHz;
+uint32_t gHighTicks = 1;
+uint32_t gPeriodTicks = 1;
+
+uint64_t gNextRise = 0;
+volatile Phase gPhase = RISE;
+
+PulseEngine::StartConfig gMove = {};
 
 PulseEngine::CompletionCallback gCompletionCallback = nullptr;
 void *gCompletionCtx = nullptr;
 
-uint32_t abs_speed_hz(uint32_t speedHz) {
-    return speedHz;
+volatile bool gRunning = false;
+volatile bool gCompletionPending = false;
+volatile uint32_t gCompletionPulses = 0;
+
+static inline uint32_t hz_to_ticks(uint32_t hz)
+{
+    if (hz == 0)
+        hz = 1;
+
+    uint32_t ticks = gTimerHz / hz;
+    return ticks == 0 ? 1 : ticks;
 }
 
-esp_err_t set_pulse_speed_hz(uint32_t speedHz) {
-    if (speedHz == 0) return ESP_ERR_INVALID_ARG;
-
-    const uint32_t runSpeedHz = abs_speed_hz(speedHz);
-    if (!gPwmInitialized) {
-        ledc_timer_config_t timerConfig = {};
-        timerConfig.speed_mode = kPulseLedsMode;
-        timerConfig.timer_num = kPulseLedsTimer;
-        timerConfig.duty_resolution = kPulseLedsResolution;
-        timerConfig.freq_hz = runSpeedHz;
-        timerConfig.clk_cfg = static_cast<ledc_clk_cfg_t>(kPulseLedsClkSrc);
-        esp_err_t timerErr = ledc_timer_config(&timerConfig);
-        if (timerErr != ESP_OK) return timerErr;
-
-        ledc_channel_config_t channelConfig = {};
-        channelConfig.gpio_num = gStepPin;
-        channelConfig.speed_mode = kPulseLedsMode;
-        channelConfig.channel = kPulseLedsChannel;
-        channelConfig.intr_type = LEDC_INTR_DISABLE;
-        channelConfig.timer_sel = kPulseLedsTimer;
-        channelConfig.duty = kPulseLedsDuty;
-        channelConfig.hpoint = 0;
-        channelConfig.flags.output_invert = 0;
-        esp_err_t channelErr = ledc_channel_config(&channelConfig);
-        if (channelErr != ESP_OK) return channelErr;
-
-        gPwmInitialized = true;
-        return ESP_OK;
-    }
-
-    uint32_t setFreqResult = ledc_set_freq(kPulseLedsMode, kPulseLedsTimer, runSpeedHz);
-    if (setFreqResult == 0) return ESP_FAIL;
-    esp_err_t dutyErr = ledc_set_duty(kPulseLedsMode, kPulseLedsChannel, kPulseLedsDuty);
-    if (dutyErr != ESP_OK) return dutyErr;
-    return ledc_update_duty(kPulseLedsMode, kPulseLedsChannel);
+static inline uint32_t normalized_start_hz()
+{
+    if (gMove.startSpeedHz != 0)
+        return gMove.startSpeedHz;
+    if (gMove.endSpeedHz != 0)
+        return gMove.endSpeedHz;
+    return 1;
 }
 
-void stop_pwm() {
-    if (gPwmInitialized) {
-        ledc_stop(kPulseLedsMode, kPulseLedsChannel, 0);
-        gPwmInitialized = false;
-    }
+static inline uint32_t normalized_end_hz()
+{
+    if (gMove.endSpeedHz != 0)
+        return gMove.endSpeedHz;
+    return normalized_start_hz();
 }
 
-bool IRAM_ATTR pulse_watch_handler(pcnt_unit_handle_t unit, const pcnt_watch_event_data_t *edata, void *user_ctx) {
-    (void)unit;
-    (void)edata;
-    (void)user_ctx;
+static uint32_t current_hz(uint32_t step)
+{
+    const uint32_t startHz = normalized_start_hz();
+    const uint32_t endHz = normalized_end_hz();
 
-    if (!gRunning) return false;
+    if (startHz == endHz)
+        return startHz;
 
-    gPulsesCompleted = gPulsesCompleted + 1;
-    pcnt_unit_clear_count(gPulseCountUnit);
+    if (gPulsesTotal <= 1)
+        return endHz;
 
-    if (gSpeedSwitchPulse > 0 && gPulsesCompleted >= gSpeedSwitchPulse) {
-        gEndSpeedPending = true;
-        gSpeedSwitchPulse = 0;
+    const uint32_t span = gPulsesTotal - 1;
+    const uint32_t clampedStep = step > span ? span : step;
+
+    const int64_t delta = static_cast<int64_t>(endHz) - static_cast<int64_t>(startHz);
+    const int64_t hz = static_cast<int64_t>(startHz) + (delta * static_cast<int64_t>(clampedStep)) / static_cast<int64_t>(span);
+
+    if (hz <= 0)
+        return 1;
+
+    return static_cast<uint32_t>(hz);
+}
+
+bool IRAM_ATTR on_alarm(gptimer_handle_t timer, const gptimer_alarm_event_data_t *eventData, void *arg)
+{
+    (void)arg;
+    const uint64_t now = eventData->count_value;
+
+    if (!gRunning)
+        return false;
+
+    if (gPulsesDone >= gPulsesTotal)
+    {
+        gpio_set_level(gStepPin, 0);
+        gRunning = false;
+        gCompletionPending = true;
+        gCompletionPulses = gPulsesDone;
+        return false;
     }
 
-    if (gPulsesCompleted < gTargetPulses) return false;
+    if (gPhase == RISE)
+    {
+        gpio_set_level(gStepPin, 1);
+        gPhase = FALL;
 
-    gRunning = false;
-    stop_pwm();
-    if (gCompletionCallback != nullptr) {
-        gCompletionCallback(gPulsesCompleted, gCompletionCtx);
+        gptimer_alarm_config_t alarm = {};
+        alarm.alarm_count = now + gHighTicks;
+        gptimer_set_alarm_action(timer, &alarm);
+        return false;
     }
+
+    gpio_set_level(gStepPin, 0);
+    gPhase = RISE;
+
+    gPulsesDone = gPulsesDone + 1;
+    if (gPulsesDone >= gPulsesTotal)
+    {
+        gRunning = false;
+        gCompletionPending = true;
+        gCompletionPulses = gPulsesDone;
+        return false;
+    }
+
+    gPeriodTicks = hz_to_ticks(current_hz(gPulsesDone));
+    while (gNextRise <= now)
+        gNextRise += gPeriodTicks;
+
+    gptimer_alarm_config_t alarm = {};
+    alarm.alarm_count = gNextRise;
+    gptimer_set_alarm_action(timer, &alarm);
+
+    gNextRise += gPeriodTicks;
     return false;
 }
 } // namespace
@@ -114,63 +151,83 @@ bool PulseEngine::isInitialized = false;
 
 esp_err_t PulseEngine::init(gpio_num_t stepPin)
 {
-    if (isInitialized) return ESP_OK;
+    if (isInitialized)
+        return ESP_OK;
+
+    // #region FIXME(PULSE-GPTIMER-DEBUG): Capture init stage progress while root-causing startup failures.
+    gLastInitErr = ESP_OK;
+    gInitGpioConfigured = false;
+    gInitTimerCreated = false;
+    gInitCallbacksRegistered = false;
+    gInitTimerEnabled = false;
+    // #endregion FIXME(PULSE-GPTIMER-DEBUG)
 
     gStepPin = stepPin;
 
-    pcnt_unit_config_t unitConfig = {};
-    unitConfig.low_limit = kPulseLowLimit;
-    unitConfig.high_limit = kPulseHighLimit;
-    unitConfig.intr_priority = 0;
-    unitConfig.flags.accum_count = 0;
-    esp_err_t err = pcnt_new_unit(&unitConfig, &gPulseCountUnit);
-    if (err != ESP_OK) return err;
+    gpio_config_t io = {};
+    io.pin_bit_mask = 1ULL << static_cast<uint32_t>(gStepPin);
+    io.mode = GPIO_MODE_OUTPUT;
+    io.pull_up_en = GPIO_PULLUP_DISABLE;
+    io.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io.intr_type = GPIO_INTR_DISABLE;
 
-    pcnt_chan_config_t channelConfig = {};
-    channelConfig.edge_gpio_num = gStepPin;
-    channelConfig.level_gpio_num = -1;
-    channelConfig.flags.invert_edge_input = 0;
-    channelConfig.flags.invert_level_input = 0;
-    channelConfig.flags.virt_edge_io_level = 0;
-    channelConfig.flags.virt_level_io_level = 0;
-    channelConfig.flags.io_loop_back = 0;
-    err = pcnt_new_channel(gPulseCountUnit, &channelConfig, &gPulseCountChannel);
-    if (err != ESP_OK) return err;
+    esp_err_t err = gpio_config(&io);
+    if (err != ESP_OK)
+    {
+        // FIXME(PULSE-GPTIMER-DEBUG): Remove when init failure path is resolved.
+        gLastInitErr = err;
+        ESP_LOGW(TAG, "init failed at gpio_config: pin=%d err=%s", static_cast<int>(gStepPin), esp_err_to_name(err));
+        return err;
+    }
+    gInitGpioConfigured = true;
 
-    err = pcnt_channel_set_edge_action(
-        gPulseCountChannel,
-        PCNT_CHANNEL_EDGE_ACTION_INCREASE,
-        PCNT_CHANNEL_EDGE_ACTION_HOLD);
-    if (err != ESP_OK) return err;
+    gpio_set_level(gStepPin, 0);
 
-    err = pcnt_channel_set_level_action(
-        gPulseCountChannel,
-        PCNT_CHANNEL_LEVEL_ACTION_KEEP,
-        PCNT_CHANNEL_LEVEL_ACTION_KEEP);
-    if (err != ESP_OK) return err;
+    gptimer_config_t timerConfig = {};
+    // FIXME(PULSE-GPTIMER-DEBUG): Keep explicit clock-source selection while validating ESP_ERR_INVALID_ARG root cause on ESP32.
+    timerConfig.clk_src = GPTIMER_CLK_SRC_DEFAULT;
+    timerConfig.direction = GPTIMER_COUNT_UP;
+    timerConfig.resolution_hz = gTimerHz;
 
-    pcnt_event_callbacks_t callbacks = {};
-    callbacks.on_reach = pulse_watch_handler;
-    err = pcnt_unit_register_event_callbacks(gPulseCountUnit, &callbacks, nullptr);
-    if (err != ESP_OK) return err;
+    err = gptimer_new_timer(&timerConfig, &gTimer);
+    if (err != ESP_OK)
+    {
+        // FIXME(PULSE-GPTIMER-DEBUG): Remove when init failure path is resolved.
+        gLastInitErr = err;
+        ESP_LOGW(TAG, "init failed at gptimer_new_timer: err=%s", esp_err_to_name(err));
+        return err;
+    }
+    gInitTimerCreated = true;
 
-    err = pcnt_unit_add_watch_point(gPulseCountUnit, kPulseWatchPoint);
-    if (err != ESP_OK) return err;
+    gptimer_event_callbacks_t callbacks = {};
+    callbacks.on_alarm = on_alarm;
 
-    err = pcnt_unit_set_glitch_filter(gPulseCountUnit, nullptr);
-    if (err != ESP_OK) return err;
+    err = gptimer_register_event_callbacks(gTimer, &callbacks, nullptr);
+    if (err != ESP_OK)
+    {
+        // FIXME(PULSE-GPTIMER-DEBUG): Remove when init failure path is resolved.
+        gLastInitErr = err;
+        ESP_LOGW(TAG, "init failed at gptimer_register_event_callbacks: err=%s", esp_err_to_name(err));
+        return err;
+    }
+    gInitCallbacksRegistered = true;
 
-    err = pcnt_unit_enable(gPulseCountUnit);
-    if (err != ESP_OK) return err;
+    err = gptimer_enable(gTimer);
+    if (err != ESP_OK)
+    {
+        // FIXME(PULSE-GPTIMER-DEBUG): Remove when init failure path is resolved.
+        gLastInitErr = err;
+        ESP_LOGW(TAG, "init failed at gptimer_enable: err=%s", esp_err_to_name(err));
+        return err;
+    }
+    gInitTimerEnabled = true;
 
-    err = pcnt_unit_clear_count(gPulseCountUnit);
-    if (err != ESP_OK) return err;
+    gHighTicks = (gTimerHz * kPulseHighUs) / 1000000;
+    if (gHighTicks == 0)
+        gHighTicks = 1;
 
-    err = pcnt_unit_start(gPulseCountUnit);
-    if (err != ESP_OK) return err;
-
+    gLastInitErr = ESP_OK;
     isInitialized = true;
-    ESP_LOGI(TAG, "Pulse engine initialized: step_pin=%u", static_cast<unsigned>(stepPin));
     return ESP_OK;
 }
 
@@ -182,32 +239,80 @@ void PulseEngine::registerCompletionCallback(CompletionCallback callback, void *
 
 esp_err_t PulseEngine::startPulses(const StartConfig &config)
 {
-    if (!isInitialized) return ESP_ERR_INVALID_STATE;
-    if (config.pulseCount == 0) return ESP_ERR_INVALID_ARG;
+    if (!isInitialized)
+    {
+        // FIXME(PULSE-GPTIMER-DEBUG): Remove when invalid-state startup root cause is fixed.
+        ESP_LOGW(
+            TAG,
+            "startPulses before init: lastInitErr=%s gpio=%d timer=%d callbacks=%d enabled=%d pulses=%u start=%u end=%u",
+            esp_err_to_name(gLastInitErr),
+            static_cast<int>(gInitGpioConfigured),
+            static_cast<int>(gInitTimerCreated),
+            static_cast<int>(gInitCallbacksRegistered),
+            static_cast<int>(gInitTimerEnabled),
+            static_cast<unsigned>(config.pulseCount),
+            static_cast<unsigned>(config.startSpeedHz),
+            static_cast<unsigned>(config.endSpeedHz));
+        return ESP_ERR_INVALID_STATE;
+    }
 
-    const uint32_t startHz = abs_speed_hz(config.startSpeedHz);
-    const uint32_t endHz = abs_speed_hz(config.endSpeedHz);
-    if (startHz == 0 && endHz == 0) return ESP_ERR_INVALID_ARG;
+    if (config.pulseCount == 0)
+        return ESP_ERR_INVALID_ARG;
 
-    gStartSpeedHz = startHz == 0 ? endHz : startHz;
-    gEndSpeedHz = endHz == 0 ? gStartSpeedHz : endHz;
+    // #region FIXME(PULSE-GPTIMER-RESET): Keep explicit pre-stop until GPTimer state transitions are fully validated.
+    gRunning = false;
+    gCompletionPending = false;
+    esp_err_t stopErr = gptimer_stop(gTimer);
+    if (stopErr != ESP_OK && stopErr != ESP_ERR_INVALID_STATE)
+        ESP_LOGW(TAG, "startPulses pre-stop failed: err=%s", esp_err_to_name(stopErr));
+    gpio_set_level(gStepPin, 0);
+    // #endregion FIXME(PULSE-GPTIMER-RESET)
 
-    gTargetPulses = config.pulseCount;
-    gPulsesCompleted = 0;
-    gSpeedSwitchPulse = gStartSpeedHz == gEndSpeedHz ? 0 : (config.pulseCount / 2);
-    gEndSpeedPending = false;
-    gRunning = true;
+    gMove = config;
+    gPulsesDone = 0;
+    gPulsesTotal = config.pulseCount;
+    gPhase = RISE;
+    gCompletionPending = false;
 
-    esp_err_t err = set_pulse_speed_hz(gStartSpeedHz);
-    if (err != ESP_OK) {
-        gRunning = false;
+    gPeriodTicks = hz_to_ticks(current_hz(0));
+
+    uint64_t now = 0;
+    gptimer_get_raw_count(gTimer, &now);
+
+    gNextRise = now + gPeriodTicks;
+
+    gptimer_alarm_config_t alarm = {};
+    alarm.alarm_count = gNextRise;
+
+    esp_err_t err = gptimer_set_alarm_action(gTimer, &alarm);
+    if (err != ESP_OK)
+    {
+        // FIXME(PULSE-GPTIMER-DEBUG): Remove when invalid-state startup root cause is fixed.
+        ESP_LOGW(
+            TAG,
+            "startPulses alarm setup failed: pulses=%u start=%u end=%u err=%s",
+            static_cast<unsigned>(config.pulseCount),
+            static_cast<unsigned>(config.startSpeedHz),
+            static_cast<unsigned>(config.endSpeedHz),
+            esp_err_to_name(err));
         return err;
     }
 
-    err = pcnt_unit_clear_count(gPulseCountUnit);
-    if (err != ESP_OK) {
+    gNextRise += gPeriodTicks;
+    gRunning = true;
+
+    err = gptimer_start(gTimer);
+    if (err != ESP_OK)
+    {
+        // FIXME(PULSE-GPTIMER-DEBUG): Remove when invalid-state startup root cause is fixed.
+        ESP_LOGW(
+            TAG,
+            "startPulses gptimer_start failed: pulses=%u start=%u end=%u err=%s",
+            static_cast<unsigned>(config.pulseCount),
+            static_cast<unsigned>(config.startSpeedHz),
+            static_cast<unsigned>(config.endSpeedHz),
+            esp_err_to_name(err));
         gRunning = false;
-        stop_pwm();
         return err;
     }
 
@@ -216,27 +321,33 @@ esp_err_t PulseEngine::startPulses(const StartConfig &config)
 
 uint32_t PulseEngine::stop()
 {
-    if (!isInitialized) return 0;
-    if (!gRunning) return 0;
+    if (!isInitialized)
+        return 0;
+
+    const uint32_t pulses = gPulsesDone;
 
     gRunning = false;
-    gSpeedSwitchPulse = 0;
-    gEndSpeedPending = false;
-    stop_pwm();
-    return gPulsesCompleted;
+    gCompletionPending = false;
+    gptimer_stop(gTimer);
+    gpio_set_level(gStepPin, 0);
+
+    return pulses;
 }
 
 void PulseEngine::service()
 {
-    if (!isInitialized) return;
-    if (!gRunning) return;
-    if (!gEndSpeedPending) return;
+    if (!isInitialized)
+        return;
 
-    gEndSpeedPending = false;
-    esp_err_t err = set_pulse_speed_hz(gEndSpeedHz);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "apply end speed failed: hz=%lu err=%s", static_cast<unsigned long>(gEndSpeedHz), esp_err_to_name(err));
-    }
+    if (!gCompletionPending)
+        return;
+
+    gCompletionPending = false;
+    gptimer_stop(gTimer);
+    gpio_set_level(gStepPin, 0);
+
+    if (gCompletionCallback != nullptr)
+        gCompletionCallback(gCompletionPulses, gCompletionCtx);
 }
 
 bool PulseEngine::isRunning()
