@@ -196,8 +196,12 @@ void StepperDriver::initMotorGpio()
     gpio_set_level(static_cast<gpio_num_t>(GPIO_USTEP_MS3), 0);
     gpio_set_level(static_cast<gpio_num_t>(GPIO_STEP_DIR), 0);
 
-    ESP_ERROR_CHECK_WITHOUT_ABORT(PulseEngine::init(static_cast<gpio_num_t>(GPIO_STEP)));
-    PulseEngine::registerCompletionCallback(&StepperDriver::onPulseRunComplete, this);
+    const esp_err_t pulseInitErr = PulseEngine::init(static_cast<gpio_num_t>(GPIO_STEP));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(pulseInitErr);
+    if (pulseInitErr == ESP_OK)
+        PulseEngine::registerCompletionCallback(&StepperDriver::onPulseRunComplete, this);
+    else
+        ESP_LOGW(TAG, "FIXME(PULSE-GPTIMER-DEBUG): PulseEngine init failed at begin: stepPin=%u err=%s", static_cast<unsigned>(GPIO_STEP), esp_err_to_name(pulseInitErr));
 
     endstop_a_interrupt(nullptr);
     endstop_b_interrupt(nullptr);
@@ -323,7 +327,7 @@ void StepperDriver::motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID
  * @param precision Wait cycles per second.
  * @param motorID 1-based ID of the motor to command.
  */
-void StepperDriver::motorStop(int32_t wait_time, uint16_t precision, uint8_t motorID)
+void StepperDriver::motorStop(signed int wait_time, unsigned short precision, uint8_t motorID)
 {
     // wait_time, cycles to wait
     // precision, wait cycles per second
@@ -357,7 +361,7 @@ void StepperDriver::motorStop(int32_t wait_time, uint16_t precision, uint8_t mot
  * @param precision Wait cycles per second.
  * @param motorID 1-based ID of the motor to command.
  */
-void StepperDriver::motorSleep(int32_t wait_time, uint16_t precision, uint8_t motorID)
+void StepperDriver::motorSleep(signed int wait_time, unsigned short precision, uint8_t motorID)
 {
     // wait_time, cycles to wait
     // precision, wait cycles per second
@@ -622,7 +626,8 @@ void IRAM_ATTR StepperDriver::driver()
                 getNextOpForDriver(i);
             }
         }
-        vTaskDelay(10);
+        // TODO(STEPPER-DRIVER-EVENT-LOOP): Replace polling + tick delay with event-driven wake (queue/task notification).
+        vTaskDelay(1);
     }
     vTaskDelete(nullptr);
 }

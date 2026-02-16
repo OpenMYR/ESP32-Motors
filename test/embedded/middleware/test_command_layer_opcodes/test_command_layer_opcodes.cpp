@@ -58,7 +58,7 @@ public:
         call_count++;
     }
 
-    void motorStop(signed int wait_time, unsigned short precision, uint8_t motor_id) override
+    void motorStop(int32_t wait_time, uint16_t precision, uint8_t motor_id) override
     {
         last_call = STOP;
         last_i32 = wait_time;
@@ -67,7 +67,7 @@ public:
         call_count++;
     }
 
-    void motorSleep(signed int wait_time, unsigned short precision, uint8_t motor_id) override
+    void motorSleep(int32_t wait_time, uint16_t precision, uint8_t motor_id) override
     {
         last_call = SLEEP;
         last_i32 = wait_time;

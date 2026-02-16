@@ -61,12 +61,12 @@ public:
     /**
      * @brief Pause the motor for the provided wait cycles.
      */
-    void motorStop(int32_t wait_time, uint16_t precision, uint8_t motorID);
+    void motorStop(signed int wait_time, unsigned short precision, uint8_t motorID);
 
     /**
      * @brief Put the motor to sleep for the wait duration.
      */
-    void motorSleep(int32_t wait_time, uint16_t precision, uint8_t motorID);
+    void motorSleep(signed int wait_time, unsigned short precision, uint8_t motorID);
 
     /** @brief Cancel the current motor command immediately. */
     void abortCommand(uint8_t motorID);
