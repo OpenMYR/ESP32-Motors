@@ -27,12 +27,20 @@ const char *TAG = "StepperDriver";
 bool gGpioIsrServiceInstalled = false;
 constexpr uint32_t kCommandTimingMarginUs = 100;
 constexpr uint64_t kMicrosecondsPerSecond = 1000000ULL;
+constexpr uint64_t kCommandTimeoutMinGraceUs = 50000ULL;
+constexpr uint64_t kCommandTimeoutGraceDivisor = 4ULL;
 constexpr UBaseType_t kMotorTaskPriority = 5;
 constexpr BaseType_t kMotorTaskCore = 1;
 constexpr bool kPulseInitOnDriverCore = true;
 
 uint32_t steps_between(int32_t a, int32_t b) {
     return a >= b ? static_cast<uint32_t>(a - b) : static_cast<uint32_t>(b - a);
+}
+
+uint64_t timeout_grace_us(uint64_t scheduledWindowUs)
+{
+    const uint64_t proportionalGrace = scheduledWindowUs / kCommandTimeoutGraceDivisor;
+    return proportionalGrace > kCommandTimeoutMinGraceUs ? proportionalGrace : kCommandTimeoutMinGraceUs;
 }
 } // namespace
 
@@ -598,6 +606,7 @@ void IRAM_ATTR StepperDriver::driver()
             if (!commandDone[i])
             {
                 PulseEngine::service();
+                if (commandDone[i]) continue;
 
                 if (!motorDwell && isEndstopTripped())
                 {
@@ -607,13 +616,25 @@ void IRAM_ATTR StepperDriver::driver()
                     continue;
                 }
 
-                if (esp_timer_get_time() >= commandDeltaTime[i])
+                const uint64_t nowUs = static_cast<uint64_t>(esp_timer_get_time());
+                if (nowUs >= commandDeltaTime[i])
                 {
                     if (motorDwell)
                     {
                     }
                     else
                     {
+                        const uint64_t scheduledWindowUs =
+                            commandDeltaTime[i] > startTime[i] ? (commandDeltaTime[i] - startTime[i]) : 0;
+                        const uint64_t graceUs = timeout_grace_us(scheduledWindowUs);
+                        const uint64_t overdueUs = nowUs - commandDeltaTime[i];
+
+                        // RMT completion can lag a planned deadline by frame refill overhead; only force-stop after a grace window.
+                        if (PulseEngine::isRunning() && overdueUs < graceUs)
+                        {
+                            continue;
+                        }
+
                         const uint32_t pulsesCompleted = PulseEngine::stop();
                         applyPulseProgress(pulsesCompleted);
                         ESP_LOGE(TAG, "Command: Timed out");

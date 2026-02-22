@@ -8,6 +8,7 @@
 
 #define MYR_PULSE_ENGINE_TYPE_GPTIMER 1
 #define MYR_PULSE_ENGINE_TYPE_LEDC 2
+#define MYR_PULSE_ENGINE_TYPE_RMT 3
 
 // Override via build flags, e.g. -D MYR_PULSE_ENGINE_TYPE=2.
 #ifndef MYR_PULSE_ENGINE_TYPE
