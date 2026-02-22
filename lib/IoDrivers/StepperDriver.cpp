@@ -16,7 +16,6 @@
 #include "StepperDriver.h"
 #include "OpBuffer.h"
 
-#define CORE_1 1
 #define UPDATE_FREQ 1000
 #define MOTOR_LOOP_STACK_BYTES 4096
 
@@ -28,6 +27,9 @@ const char *TAG = "StepperDriver";
 bool gGpioIsrServiceInstalled = false;
 constexpr uint32_t kCommandTimingMarginUs = 100;
 constexpr uint64_t kMicrosecondsPerSecond = 1000000ULL;
+constexpr UBaseType_t kMotorTaskPriority = 5;
+constexpr BaseType_t kMotorTaskCore = 1;
+constexpr bool kPulseInitOnDriverCore = true;
 
 uint32_t steps_between(int32_t a, int32_t b) {
     return a >= b ? static_cast<uint32_t>(a - b) : static_cast<uint32_t>(b - a);
@@ -196,10 +198,13 @@ void StepperDriver::initMotorGpio()
     gpio_set_level(static_cast<gpio_num_t>(GPIO_USTEP_MS3), 0);
     gpio_set_level(static_cast<gpio_num_t>(GPIO_STEP_DIR), 0);
 
-    const esp_err_t pulseInitErr = PulseEngine::init(static_cast<gpio_num_t>(GPIO_STEP));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(pulseInitErr);
-    if (pulseInitErr == ESP_OK)
-        PulseEngine::registerCompletionCallback(&StepperDriver::onPulseRunComplete, this);
+    if (!kPulseInitOnDriverCore)
+    {
+        const esp_err_t pulseInitErr = PulseEngine::init(static_cast<gpio_num_t>(GPIO_STEP));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(pulseInitErr);
+        if (pulseInitErr == ESP_OK)
+            PulseEngine::registerCompletionCallback(&StepperDriver::onPulseRunComplete, this);
+    }
 
     endstop_a_interrupt(nullptr);
     endstop_b_interrupt(nullptr);
@@ -398,7 +403,7 @@ void StepperDriver::abortCommand(uint8_t motorID)
 }
 
 /**
- * @brief Create a pinned FreeRTOS task to run the motor driver loop on CORE_1.
+ * @brief Create a pinned FreeRTOS task to run the motor driver loop on the configured core.
  */
 void StepperDriver::isrStartIoDriver()
 {
@@ -410,9 +415,9 @@ void StepperDriver::isrStartIoDriver()
         "motorloopstep",
         MOTOR_LOOP_STACK_BYTES,
         (void *)1,
-        0,
+        kMotorTaskPriority,
         &motorTaskDriver,
-        CORE_1);
+        kMotorTaskCore);
 }
 
 /**
@@ -533,7 +538,15 @@ void StepperDriver::isrStopIoDriver()
 void StepperDriver::isrIoStep(void *pvParameters)
 {
     (void)pvParameters;
-    StepperDriver::getInstance()->driver();
+    StepperDriver *driver = StepperDriver::getInstance();
+    if (kPulseInitOnDriverCore)
+    {
+        const esp_err_t pulseInitErr = PulseEngine::init(static_cast<gpio_num_t>(GPIO_STEP));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(pulseInitErr);
+        if (pulseInitErr == ESP_OK)
+            PulseEngine::registerCompletionCallback(&StepperDriver::onPulseRunComplete, driver);
+    }
+    driver->driver();
 }
 
 void IRAM_ATTR StepperDriver::onPulseRunComplete(uint32_t pulsesCompleted, void *userCtx)
@@ -601,7 +614,8 @@ void IRAM_ATTR StepperDriver::driver()
                     }
                     else
                     {
-                        applyPulseProgress(PulseEngine::stop());
+                        const uint32_t pulsesCompleted = PulseEngine::stop();
+                        applyPulseProgress(pulsesCompleted);
                         ESP_LOGE(TAG, "Command: Timed out");
                         ESP_LOGE(
                             TAG,
@@ -609,6 +623,20 @@ void IRAM_ATTR StepperDriver::driver()
                             static_cast<int>(startAngle[i]),
                             static_cast<int>(commandDeltaAngle[i]),
                             static_cast<unsigned int>(startTime[i]));
+                        // #region FIXME(STEPPER-MISSED-STEP-TRACE): Temporary timeout diagnostics to quantify commanded-vs-completed pulse gap under load.
+                        const uint32_t pulsesRequested =
+                            steps_between(static_cast<int32_t>(startAngle[i]), static_cast<int32_t>(commandDeltaAngle[i]));
+                        const uint32_t pulsesMissing = pulsesRequested > pulsesCompleted ? pulsesRequested - pulsesCompleted : 0;
+                        if (pulsesMissing > 0)
+                            ESP_LOGW(
+                                TAG,
+                                "missed-step detect: requested=%u completed=%u missing=%u elapsed_us=%llu deadline_us=%llu",
+                                static_cast<unsigned>(pulsesRequested),
+                                static_cast<unsigned>(pulsesCompleted),
+                                static_cast<unsigned>(pulsesMissing),
+                                static_cast<unsigned long long>(esp_timer_get_time() - startTime[i]),
+                                static_cast<unsigned long long>(commandDeltaTime[i] - startTime[i]));
+                        // #endregion
                     }
                     commandDone[i] = true;
                     ESP_LOGV(TAG, "Command: Done");

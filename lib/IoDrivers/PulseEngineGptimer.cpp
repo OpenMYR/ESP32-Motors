@@ -14,6 +14,7 @@ enum Phase
 
 constexpr uint32_t kDefaultTimerHz = 1000000;
 constexpr uint32_t kPulseHighUs = 2;
+constexpr int kGptimerIntrPriority = 1;
 const char *TAG = "PulseEngine";
 
 gptimer_handle_t gTimer = nullptr;
@@ -24,9 +25,9 @@ uint32_t gPulsesTotal = 0;
 
 uint32_t gTimerHz = kDefaultTimerHz;
 uint32_t gHighTicks = 1;
-uint32_t gPeriodTicks = 1;
 
-uint64_t gNextRise = 0;
+uint64_t gRunStartTick = 0;
+uint64_t gNextRiseOffsetTicks = 0;
 volatile Phase gPhase = RISE;
 
 PulseEngine::StartConfig gMove = {};
@@ -37,6 +38,13 @@ void *gCompletionCtx = nullptr;
 volatile bool gRunning = false;
 volatile bool gCompletionPending = false;
 volatile uint32_t gCompletionPulses = 0;
+// #region FIXME(PULSE-GPTIMER-GLITCH-TRACE): Temporary rise catch-up diagnostics. Remove after root-cause verification and stability confirmation on hardware.
+volatile uint32_t gRiseCatchupCount = 0;
+volatile uint32_t gRiseCatchupLastLateTicks = 0;
+volatile uint32_t gRiseCatchupMaxLateTicks = 0;
+volatile uint64_t gRiseCatchupLateTicksTotal = 0;
+bool gRiseCatchupSummaryPending = false;
+// #endregion
 
 static inline uint32_t period_ticks_for_step(uint32_t step)
 {
@@ -51,6 +59,36 @@ static inline uint32_t period_ticks_for_step(uint32_t step)
 
     return gTimerHz / static_cast<uint32_t>(hz);
 }
+
+// #region FIXME(PULSE-GPTIMER-GLITCH-TRACE): Temporary end-of-run jitter summary reporting.
+static void emit_rise_jitter_summary(const char *reason, uint32_t pulsesCompleted)
+{
+    if (!gRiseCatchupSummaryPending) return;
+    gRiseCatchupSummaryPending = false;
+
+    if (gRiseCatchupCount == 0)
+    {
+        ESP_LOGI(
+            TAG,
+            "rise jitter summary: reason=%s catchups=0 pulses_done=%u pulses_total=%u",
+            reason,
+            static_cast<unsigned>(pulsesCompleted),
+            static_cast<unsigned>(gPulsesTotal));
+        return;
+    }
+
+    ESP_LOGW(
+        TAG,
+        "rise jitter summary: reason=%s catchups=%u avg_late_ticks=%u max_late_ticks=%u last_late_ticks=%u pulses_done=%u pulses_total=%u",
+        reason,
+        static_cast<unsigned>(gRiseCatchupCount),
+        static_cast<unsigned>(gRiseCatchupLateTicksTotal / gRiseCatchupCount),
+        static_cast<unsigned>(gRiseCatchupMaxLateTicks),
+        static_cast<unsigned>(gRiseCatchupLastLateTicks),
+        static_cast<unsigned>(pulsesCompleted),
+        static_cast<unsigned>(gPulsesTotal));
+}
+// #endregion
 
 bool IRAM_ATTR on_alarm(gptimer_handle_t timer, const gptimer_alarm_event_data_t *eventData, void *arg)
 {
@@ -92,15 +130,24 @@ bool IRAM_ATTR on_alarm(gptimer_handle_t timer, const gptimer_alarm_event_data_t
         return false;
     }
 
-    gPeriodTicks = period_ticks_for_step(gPulsesDone);
-    while (gNextRise <= now)
-        gNextRise += gPeriodTicks;
+    gNextRiseOffsetTicks += period_ticks_for_step(gPulsesDone);
+    uint64_t nextRise = gRunStartTick + gNextRiseOffsetTicks;
+    // #region FIXME(PULSE-GPTIMER-GLITCH-TRACE): Temporary catch-up event capture for observed rise scheduling glitches.
+    if (nextRise <= now)
+    {
+        const uint64_t lateTicks64 = (now - nextRise) + 1;
+        const uint32_t lateTicks = lateTicks64 > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(lateTicks64);
+        gRiseCatchupCount = gRiseCatchupCount + 1;
+        gRiseCatchupLastLateTicks = lateTicks;
+        if (lateTicks > gRiseCatchupMaxLateTicks) gRiseCatchupMaxLateTicks = lateTicks;
+        gRiseCatchupLateTicksTotal = gRiseCatchupLateTicksTotal + lateTicks;
+        nextRise = now + 1;
+    }
+    // #endregion
 
     gptimer_alarm_config_t alarm = {};
-    alarm.alarm_count = gNextRise;
+    alarm.alarm_count = nextRise;
     gptimer_set_alarm_action(timer, &alarm);
-
-    gNextRise += gPeriodTicks;
     return false;
 }
 } // namespace
@@ -133,6 +180,7 @@ esp_err_t PulseEngine::init(gpio_num_t stepPin)
     timerConfig.clk_src = GPTIMER_CLK_SRC_DEFAULT;
     timerConfig.direction = GPTIMER_COUNT_UP;
     timerConfig.resolution_hz = gTimerHz;
+    timerConfig.intr_priority = kGptimerIntrPriority;
 
     err = gptimer_new_timer(&timerConfig, &gTimer);
     if (err != ESP_OK)
@@ -172,6 +220,7 @@ void PulseEngine::registerCompletionCallback(CompletionCallback callback, void *
 esp_err_t PulseEngine::startPulses(const StartConfig &config)
 {
     // Normalize timer/output state before arming a new pulse run.
+    emit_rise_jitter_summary("restart", gPulsesDone);
     gRunning = false;
     gCompletionPending = false;
     esp_err_t stopErr = gptimer_stop(gTimer);
@@ -184,24 +233,28 @@ esp_err_t PulseEngine::startPulses(const StartConfig &config)
     gPulsesTotal = config.pulseCount;
     gPhase = RISE;
     gCompletionPending = false;
-
-    gPeriodTicks = period_ticks_for_step(0);
+    // #region FIXME(PULSE-GPTIMER-GLITCH-TRACE): Reset temporary run-scoped glitch counters.
+    gRiseCatchupCount = 0;
+    gRiseCatchupLastLateTicks = 0;
+    gRiseCatchupMaxLateTicks = 0;
+    gRiseCatchupLateTicksTotal = 0;
+    gRiseCatchupSummaryPending = true;
+    // #endregion
 
     uint64_t now = 0;
     gptimer_get_raw_count(gTimer, &now);
 
-    gNextRise = now + gPeriodTicks;
+    gRunStartTick = now;
+    gNextRiseOffsetTicks = period_ticks_for_step(0);
 
     gptimer_alarm_config_t alarm = {};
-    alarm.alarm_count = gNextRise;
+    alarm.alarm_count = gRunStartTick + gNextRiseOffsetTicks;
 
     esp_err_t err = gptimer_set_alarm_action(gTimer, &alarm);
     if (err != ESP_OK)
     {
         return err;
     }
-
-    gNextRise += gPeriodTicks;
     gRunning = true;
 
     err = gptimer_start(gTimer);
@@ -217,6 +270,7 @@ esp_err_t PulseEngine::startPulses(const StartConfig &config)
 uint32_t PulseEngine::stop()
 {
     const uint32_t pulses = gPulsesDone;
+    emit_rise_jitter_summary("stop", pulses);
 
     gRunning = false;
     gCompletionPending = false;
@@ -231,6 +285,7 @@ void PulseEngine::service()
     if (!gCompletionPending)
         return;
 
+    emit_rise_jitter_summary("complete", gCompletionPulses);
     gCompletionPending = false;
     gptimer_stop(gTimer);
     gpio_set_level(gStepPin, 0);

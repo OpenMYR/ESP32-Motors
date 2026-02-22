@@ -67,7 +67,7 @@ public:
         pushCall('G', step_num, step_rate, motor_id);
     }
 
-    void motorStop(int32_t wait_time, uint16_t precision, uint8_t motor_id) override
+    void motorStop(signed int wait_time, unsigned short precision, uint8_t motor_id) override
     {
         stopCalled = true;
         lastStepNum = wait_time;
@@ -76,7 +76,7 @@ public:
         pushCall('S', wait_time, precision, motor_id);
     }
 
-    void motorSleep(int32_t wait_time, uint16_t precision, uint8_t motor_id) override
+    void motorSleep(signed int wait_time, unsigned short precision, uint8_t motor_id) override
     {
         sleepCalled = true;
         lastStepNum = wait_time;
@@ -202,6 +202,17 @@ void test_stop_command_queue_zero_inserts_kill_before_dispatch(void)
     TEST_ASSERT_EQUAL_INT32(250, gFakeDriver.lastStepNum);
     TEST_ASSERT_EQUAL_UINT16(1000, gFakeDriver.lastStepRate);
     TEST_ASSERT_EQUAL_UINT8(1, gFakeDriver.lastMotorId);
+}
+
+void test_motion_command_rejects_zero_step_rate(void)
+{
+    const char *payload = "{\"commands\":[{\"code\":\"M\",\"data\":[1,1,250,0]}]}";
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, WebCommandDispatcher::processPayload(payload));
+    TEST_ASSERT_TRUE(OpBuffer::getInstance()->isEmpty(1));
+    TEST_ASSERT_FALSE(gFakeDriver.moveCalled);
+    TEST_ASSERT_FALSE(gFakeDriver.gotoCalled);
+    TEST_ASSERT_FALSE(gFakeDriver.stopCalled);
+    TEST_ASSERT_FALSE(gFakeDriver.sleepCalled);
 }
 
 void test_sequence_u_m_i_m_dispatch_order_is_preserved(void)
@@ -395,6 +406,7 @@ extern "C" void app_main(void)
     RUN_TEST(test_sleep_command_payload_dispatches_wait_and_precision);
     RUN_TEST(test_sleep_command_payload_maps_to_expected_dwell_duration);
     RUN_TEST(test_stop_command_queue_zero_inserts_kill_before_dispatch);
+    RUN_TEST(test_motion_command_rejects_zero_step_rate);
     RUN_TEST(test_sequence_u_m_i_m_dispatch_order_is_preserved);
     RUN_TEST(test_sequence_u_m_i_m_dispatch_order_is_preserved_under_concurrent_drain);
     RUN_TEST(test_sequence_m_sssss_m_queue_duration_totals_2p05_seconds);

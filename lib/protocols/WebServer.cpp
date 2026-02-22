@@ -251,7 +251,7 @@ esp_err_t get_static_handler(httpd_req_t *req) {
         return httpd_resp_sendstr(req, "Not Found");
     }
 
-    ESP_LOGI(TAG, "GET %s -> %s", req->uri, path);
+    ESP_LOGD(TAG, "GET %s -> %s", req->uri, path);
     return send_file_chunks(req, path);
 }
 
