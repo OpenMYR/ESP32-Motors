@@ -200,8 +200,6 @@ void StepperDriver::initMotorGpio()
     ESP_ERROR_CHECK_WITHOUT_ABORT(pulseInitErr);
     if (pulseInitErr == ESP_OK)
         PulseEngine::registerCompletionCallback(&StepperDriver::onPulseRunComplete, this);
-    else
-        ESP_LOGW(TAG, "FIXME(PULSE-GPTIMER-DEBUG): PulseEngine init failed at begin: stepPin=%u err=%s", static_cast<unsigned>(GPIO_STEP), esp_err_to_name(pulseInitErr));
 
     endstop_a_interrupt(nullptr);
     endstop_b_interrupt(nullptr);

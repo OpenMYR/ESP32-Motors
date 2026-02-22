@@ -6,6 +6,14 @@
 #include <driver/gpio.h>
 #include <esp_err.h>
 
+#define MYR_PULSE_ENGINE_TYPE_GPTIMER 1
+#define MYR_PULSE_ENGINE_TYPE_LEDC 2
+
+// Override via build flags, e.g. -D MYR_PULSE_ENGINE_TYPE=2.
+#ifndef MYR_PULSE_ENGINE_TYPE
+#define MYR_PULSE_ENGINE_TYPE MYR_PULSE_ENGINE_TYPE_GPTIMER
+#endif
+
 class PulseEngine
 {
 public:
