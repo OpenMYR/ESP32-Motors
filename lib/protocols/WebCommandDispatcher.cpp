@@ -135,6 +135,7 @@ esp_err_t handle_motor_motion_command(char code, cJSON *data) {
     Op op = {};
     esp_err_t err = parse_motor_data(data, &op);
     if (err != ESP_OK) return err;
+    if (op.stepRate == 0) return ESP_ERR_INVALID_ARG;
 
     op.opcode = code;
     return enqueue_motor_op(&op);

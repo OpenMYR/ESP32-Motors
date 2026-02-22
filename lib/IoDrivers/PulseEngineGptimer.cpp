@@ -38,52 +38,18 @@ volatile bool gRunning = false;
 volatile bool gCompletionPending = false;
 volatile uint32_t gCompletionPulses = 0;
 
-static inline uint32_t hz_to_ticks(uint32_t hz)
+static inline uint32_t period_ticks_for_step(uint32_t step)
 {
-    if (hz == 0)
-        hz = 1;
-
-    uint32_t ticks = gTimerHz / hz;
-    return ticks == 0 ? 1 : ticks;
-}
-
-static inline uint32_t normalized_start_hz()
-{
-    if (gMove.startSpeedHz != 0)
-        return gMove.startSpeedHz;
-    if (gMove.endSpeedHz != 0)
-        return gMove.endSpeedHz;
-    return 1;
-}
-
-static inline uint32_t normalized_end_hz()
-{
-    if (gMove.endSpeedHz != 0)
-        return gMove.endSpeedHz;
-    return normalized_start_hz();
-}
-
-static uint32_t current_hz(uint32_t step)
-{
-    const uint32_t startHz = normalized_start_hz();
-    const uint32_t endHz = normalized_end_hz();
-
-    if (startHz == endHz)
-        return startHz;
-
-    if (gPulsesTotal <= 1)
-        return endHz;
+    if (gMove.startSpeedHz == gMove.endSpeedHz) return gTimerHz / gMove.startSpeedHz;
+    if (gPulsesTotal <= 1) return gTimerHz / gMove.endSpeedHz;
 
     const uint32_t span = gPulsesTotal - 1;
-    const uint32_t clampedStep = step > span ? span : step;
+    const int64_t hz = static_cast<int64_t>(gMove.startSpeedHz) +
+                       ((static_cast<int64_t>(gMove.endSpeedHz) - static_cast<int64_t>(gMove.startSpeedHz)) *
+                        static_cast<int64_t>(step > span ? span : step)) /
+                           static_cast<int64_t>(span);
 
-    const int64_t delta = static_cast<int64_t>(endHz) - static_cast<int64_t>(startHz);
-    const int64_t hz = static_cast<int64_t>(startHz) + (delta * static_cast<int64_t>(clampedStep)) / static_cast<int64_t>(span);
-
-    if (hz <= 0)
-        return 1;
-
-    return static_cast<uint32_t>(hz);
+    return gTimerHz / static_cast<uint32_t>(hz);
 }
 
 bool IRAM_ATTR on_alarm(gptimer_handle_t timer, const gptimer_alarm_event_data_t *eventData, void *arg)
@@ -126,7 +92,7 @@ bool IRAM_ATTR on_alarm(gptimer_handle_t timer, const gptimer_alarm_event_data_t
         return false;
     }
 
-    gPeriodTicks = hz_to_ticks(current_hz(gPulsesDone));
+    gPeriodTicks = period_ticks_for_step(gPulsesDone);
     while (gNextRise <= now)
         gNextRise += gPeriodTicks;
 
@@ -219,7 +185,7 @@ esp_err_t PulseEngine::startPulses(const StartConfig &config)
     gPhase = RISE;
     gCompletionPending = false;
 
-    gPeriodTicks = hz_to_ticks(current_hz(0));
+    gPeriodTicks = period_ticks_for_step(0);
 
     uint64_t now = 0;
     gptimer_get_raw_count(gTimer, &now);
