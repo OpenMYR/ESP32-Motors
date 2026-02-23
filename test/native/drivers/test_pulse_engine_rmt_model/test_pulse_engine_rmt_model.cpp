@@ -2,13 +2,13 @@
 
 #include <vector>
 
-#include "../../../../lib/IoDrivers/PulseEngineRmtModel.h"
-#include "../../../../lib/IoDrivers/PulseEngineRmtSequencer.h"
+#include "../../../support/pulse_engine_rmt/PulseEngineRmtModel.h"
+#include "../../../support/pulse_engine_rmt/PulseEngineRmtSequencer.h"
 
 // Native env compiles tests only, so include implementation units directly.
-#include "../../../../lib/IoDrivers/PulseEngineTrapezoid.cpp"
-#include "../../../../lib/IoDrivers/PulseEngineRmtModel.cpp"
-#include "../../../../lib/IoDrivers/PulseEngineRmtSequencer.cpp"
+#include "../../../support/pulse_engine_rmt/PulseEngineTrapezoid.cpp"
+#include "../../../support/pulse_engine_rmt/PulseEngineRmtModel.cpp"
+#include "../../../support/pulse_engine_rmt/PulseEngineRmtSequencer.cpp"
 
 namespace {
 struct Timeline

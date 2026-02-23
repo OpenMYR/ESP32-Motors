@@ -1,9 +1,9 @@
 #include <unity.h>
 
-#include "../../../../lib/IoDrivers/PulseEngineTrapezoid.h"
+#include "../../../support/pulse_engine_rmt/PulseEngineTrapezoid.h"
 
 // Native env compiles tests only, so include implementation units directly.
-#include "../../../../lib/IoDrivers/PulseEngineTrapezoid.cpp"
+#include "../../../support/pulse_engine_rmt/PulseEngineTrapezoid.cpp"
 
 void test_begin_rejects_invalid_total_steps(void)
 {
