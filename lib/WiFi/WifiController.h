@@ -41,7 +41,7 @@ class WifiController {
     static esp_err_t setDefaultApCredentials(const std::string *ssid, const std::string *pass);
     static esp_err_t setDefaultStaCredentials(const std::string *ssid, const std::string *pass);
     static esp_err_t setDefaultMode(uint8_t mode);
-    static void changeOTAPass(const std::string *oldPass, const std::string *pass);
+    static esp_err_t changeOTAPass(const std::string *oldPass, const std::string *pass);
     static std::string getOTAPassword();
     static myr_wifi_state_t getWiFiState();
 

@@ -162,7 +162,10 @@ void CommandParser::parseConfig(JsonObject *cmd, char code)
         WifiController::fireWifiEvent(WifiController::MYR_WIFI_EVENT_DISCONNECT, nullptr);
         err = WifiController::setDefaultMode(MYR_WIFI_MODE_AP);
         ESP_ERROR_CHECK_WITHOUT_ABORT(err);
-    } else if(code == 'O') WifiController::changeOTAPass(&ssid, &pass);
+    } else if(code == 'O') {
+        err = WifiController::changeOTAPass(&ssid, &pass);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+    }
     else log_i("Unknown command %c", code);
 }
 

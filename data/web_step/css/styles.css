@@ -199,6 +199,18 @@ body {
   padding-top: 20px;
   padding-bottom: 20px
 }
+.status {
+  min-height: 1.25em;
+  margin-top: 8px;
+  font-size: 0.9rem;
+  font-family: 'Open Sans', 'Droid Sans', Arial, sans-serif;
+}
+.status.success {
+  color: #157e15;
+}
+.status.error {
+  color: #c00;
+}
 
 .centerx {
   position: relative; left: 50%;

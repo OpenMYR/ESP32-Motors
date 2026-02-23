@@ -12,7 +12,7 @@ struct WifiOps {
     esp_err_t (*setDefaultStaCredentials)(const std::string *ssid, const std::string *pass);
     esp_err_t (*setDefaultMode)(uint16_t mode);
     void (*fireDisconnectEvent)();
-    void (*changeOtaPass)(const std::string *old_pass, const std::string *new_pass);
+    esp_err_t (*changeOtaPass)(const std::string *old_pass, const std::string *new_pass);
 };
 
 esp_err_t processPayload(const char *payload);

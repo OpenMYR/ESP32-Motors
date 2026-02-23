@@ -392,25 +392,26 @@ esp_err_t WifiController::changeModeToApSta() {
     return ESP_OK;
 }
 
-void WifiController::changeOTAPass(const std::string *oldPass, const std::string *pass) {
+esp_err_t WifiController::changeOTAPass(const std::string *oldPass, const std::string *pass) {
     if (oldPass == nullptr || pass == nullptr || pass->empty()) {
         ESP_LOGW(TAG, "Rejected OTA password change: invalid arguments");
-        return;
+        return ESP_ERR_INVALID_ARG;
     }
 
     const std::string current = getOTAPassword();
     if (*oldPass != current) {
         ESP_LOGW(TAG, "Rejected OTA password change: old password mismatch");
-        return;
+        return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t err = saveValue(MYR_WIFI_PREF_TAG_OTA_PASS, pass);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to persist OTA password: %s", esp_err_to_name(err));
-        return;
+        return err;
     }
 
     ESP_LOGI(TAG, "OTA password changed");
+    return ESP_OK;
 }
 
 std::string WifiController::getOTAPassword() {

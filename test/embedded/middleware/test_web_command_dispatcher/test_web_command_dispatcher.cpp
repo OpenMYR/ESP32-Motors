@@ -9,6 +9,7 @@ struct FakeWifiState {
     esp_err_t connect_err = ESP_OK;
     esp_err_t creds_err = ESP_OK;
     esp_err_t mode_err = ESP_OK;
+    esp_err_t ota_pass_err = ESP_OK;
 
     uint32_t connect_calls = 0;
     uint32_t creds_calls = 0;
@@ -58,11 +59,12 @@ void fake_fire_disconnect_event()
     gWifi.disconnect_calls++;
 }
 
-void fake_change_ota_pass(const std::string *old_pass, const std::string *new_pass)
+esp_err_t fake_change_ota_pass(const std::string *old_pass, const std::string *new_pass)
 {
     gWifi.ota_pass_calls++;
     gWifi.last_old_ota_pass = (old_pass != nullptr) ? *old_pass : "";
     gWifi.last_new_ota_pass = (new_pass != nullptr) ? *new_pass : "";
+    return gWifi.ota_pass_err;
 }
 
 void configure_fake_wifi()
@@ -210,6 +212,16 @@ void test_processPayload_config_O_invokes_change_password(void)
     TEST_ASSERT_EQUAL_STRING("new-pass", gWifi.last_new_ota_pass.c_str());
 }
 
+void test_processPayload_config_O_propagates_change_password_error(void)
+{
+    gWifi.ota_pass_err = ESP_ERR_INVALID_STATE;
+    const char *payload = R"({"commands":[{"code":"O","data":["old-pass","new-pass"]}]})";
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, WebCommandDispatcher::processPayload(payload));
+    TEST_ASSERT_EQUAL_UINT32(1, gWifi.ota_pass_calls);
+    TEST_ASSERT_EQUAL_STRING("old-pass", gWifi.last_old_ota_pass.c_str());
+    TEST_ASSERT_EQUAL_STRING("new-pass", gWifi.last_new_ota_pass.c_str());
+}
+
 extern "C" void app_main(void)
 {
     UNITY_BEGIN();
@@ -224,5 +236,6 @@ extern "C" void app_main(void)
     RUN_TEST(test_processPayload_config_D_fires_disconnect_and_propagates_mode_error);
     RUN_TEST(test_processPayload_config_O_requires_two_strings);
     RUN_TEST(test_processPayload_config_O_invokes_change_password);
+    RUN_TEST(test_processPayload_config_O_propagates_change_password_error);
     UNITY_END();
 }

@@ -32,6 +32,19 @@ if (disconnectButton){
 	});
 }
 
+var changeStatus = document.getElementById("changeStatus");
+
+function updateChangeStatus(message, success) {
+	if (!changeStatus) return;
+	changeStatus.textContent = message || "";
+	changeStatus.classList.remove("success", "error");
+	if (success === true) {
+		changeStatus.classList.add("success");
+	} else if (success === false) {
+		changeStatus.classList.add("error");
+	}
+}
+
 var changeButton = document.getElementById("change");
 if (changeButton){
 	changeButton.addEventListener("click", function(){
@@ -55,7 +68,15 @@ if (changeButton){
 				newPass
 			]
 		};
-		send(parameters);
+		updateChangeStatus("Updating OTA password...", null);
+		send(parameters, function(request){
+			if (request.status === 202) {
+				updateChangeStatus("OTA password updated.", true);
+			} else {
+				var message = request.responseText || request.statusText || request.status;
+				updateChangeStatus("Change failed: " + message, false);
+			}
+		});
 	});
 }
 
@@ -102,11 +123,15 @@ if (otaForm){
 	});
 }
 
-function send (args){
+function send (args, callback){
 	let out = {
 		commands : [args]
 	};
 	httpRequest.open("POST", "/", true);
 	httpRequest.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+	httpRequest.onreadystatechange = function(){
+		if (httpRequest.readyState !== XMLHttpRequest.DONE) return;
+		if (callback) callback(httpRequest);
+	};
 	httpRequest.send(JSON.stringify(out));
 }

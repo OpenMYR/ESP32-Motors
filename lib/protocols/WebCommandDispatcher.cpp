@@ -33,9 +33,9 @@ void wifi_fire_disconnect()
     WifiController::fireWifiEvent(WifiController::MYR_WIFI_EVENT_DISCONNECT, nullptr);
 }
 
-void wifi_change_ota_pass(const std::string *old_pass, const std::string *new_pass)
+esp_err_t wifi_change_ota_pass(const std::string *old_pass, const std::string *new_pass)
 {
-    WifiController::changeOTAPass(old_pass, new_pass);
+    return WifiController::changeOTAPass(old_pass, new_pass);
 }
 
 const WebCommandDispatcher::WifiOps kDefaultWifiOps = {
@@ -89,8 +89,7 @@ esp_err_t handle_config_command(char code, cJSON *data) {
         esp_err_t err = parse_config_pair(data, &old_pass, &new_pass);
         if (err != ESP_OK) return err;
 
-        gWifiOps.changeOtaPass(&old_pass, &new_pass);
-        return ESP_OK;
+        return gWifiOps.changeOtaPass(&old_pass, &new_pass);
     }
 
     ESP_LOGD(TAG, "POST command '%c' ignored in IDF baseline", code);
