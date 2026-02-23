@@ -40,7 +40,7 @@ public:
      * @param motor_id One-based motor index.
      * @return True when the motor is active.
      */
-    bool isMotorRunning(uint8_t motor_id);
+    bool isMotorRunning(uint8_t motorID);
 
     /** @brief Launch the stepper driver task on CORE_1. */
     void isrStartIoDriver();

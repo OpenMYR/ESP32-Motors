@@ -114,6 +114,19 @@ class MotorDriver
          */
         virtual void peekOpForDriver(uint8_t id) {}
         
+        /**
+         * @brief  Validate a one-based motor ID and convert it to a zero-based index.
+         * @param motorID One-based motor identifier from command input.
+         * @param motor_count Number of motors supported by the active driver.
+         * @param[out] motor_index Zero-based index to use for internal arrays.
+         * @return true if @p motorID is in the valid range [1, motor_count]; false otherwise.
+         */        
+        static inline bool tryResolveMotorIndex(uint8_t motorID, uint8_t motorsControlled, uint8_t &idx) {
+          if (motorID == 0 || motorID > motorsControlled) return false;
+          idx = static_cast<uint8_t>(motorID - 1);
+          return true;
+        }
+
         TaskHandle_t motorTaskDriver;
 
 };

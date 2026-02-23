@@ -7,13 +7,9 @@
 #include <driver/rmt_tx.h>
 #include <esp_attr.h>
 #include <esp_log.h>
-#include <esp_private/rmt.h>
-#include <esp_rom_gpio.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <sdkconfig.h>
-#include <soc/rmt_periph.h>
-#include <soc/soc_caps.h>
 
 namespace {
 const char *TAG = "PulseEngine";
@@ -24,7 +20,6 @@ constexpr uint16_t kSymbolDurationMax = 32767;
 constexpr int kRmtIntrPriority = 1;
 constexpr size_t kRmtMemBlockSymbols = 512;
 constexpr size_t kRmtQueueDepth = 1;
-constexpr gpio_num_t kStepScopeMirrorPin = GPIO_NUM_23;
 
 constexpr int kPcntHighLimit = 30000;
 constexpr int kPcntLowLimit = -1;
@@ -64,41 +59,6 @@ bool gTxEnabled = false;
 #else
 #define MYR_RMT_CALLBACK_ATTR
 #endif
-
-esp_err_t configure_scope_mirror_pin()
-{
-    if (kStepScopeMirrorPin == GPIO_NUM_NC) return ESP_OK;
-    if (kStepScopeMirrorPin == gStepPin) return ESP_OK;
-    if (!GPIO_IS_VALID_OUTPUT_GPIO(kStepScopeMirrorPin)) return ESP_ERR_INVALID_ARG;
-#if SOC_RMT_GROUPS != 1
-    return ESP_ERR_NOT_SUPPORTED;
-#else
-    if (gTxChannel == nullptr) return ESP_ERR_INVALID_STATE;
-
-    int channelId = -1;
-    esp_err_t err = rmt_get_channel_id(gTxChannel, &channelId);
-    if (err != ESP_OK) return err;
-    if (channelId < 0 || channelId >= static_cast<int>(SOC_RMT_CHANNELS_PER_GROUP)) return ESP_ERR_INVALID_STATE;
-
-    gpio_config_t io = {};
-    io.pin_bit_mask = 1ULL << static_cast<uint32_t>(kStepScopeMirrorPin);
-    io.mode = GPIO_MODE_OUTPUT;
-    io.pull_up_en = GPIO_PULLUP_DISABLE;
-    io.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    io.intr_type = GPIO_INTR_DISABLE;
-    err = gpio_config(&io);
-    if (err != ESP_OK) return err;
-    gpio_set_level(kStepScopeMirrorPin, 0);
-
-    esp_rom_gpio_pad_select_gpio(static_cast<uint32_t>(kStepScopeMirrorPin));
-    esp_rom_gpio_connect_out_signal(
-        kStepScopeMirrorPin,
-        rmt_periph_signals.groups[0].channels[channelId].tx_sig,
-        false,
-        false);
-    return ESP_OK;
-#endif
-}
 
 static inline uint32_t IRAM_ATTR period_ticks_for_step(uint32_t step)
 {
@@ -411,12 +371,6 @@ esp_err_t PulseEngine::init(gpio_num_t stepPin)
 
     err = ensure_tx_enabled();
     if (err != ESP_OK) return err;
-
-    err = configure_scope_mirror_pin();
-    if (err != ESP_OK && err != ESP_ERR_NOT_SUPPORTED)
-    {
-        ESP_LOGW(TAG, "scope mirror pin setup failed: pin=%d err=%s", static_cast<int>(kStepScopeMirrorPin), esp_err_to_name(err));
-    }
 
     gHighTicks = (kRmtResolutionHz * kPulseHighUs) / 1000000U;
     if (gHighTicks == 0) gHighTicks = 1;

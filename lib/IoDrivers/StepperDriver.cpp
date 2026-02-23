@@ -226,16 +226,15 @@ void StepperDriver::initMotorGpio()
  */
 void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID)
 {
-    if (motorID > motorsControlled)
-        return;
-    motorID--;
+    uint8_t motorIndex = 0;
+    if (!tryResolveMotorIndex(motorID, motorsControlled, motorIndex)) return;
 
     if (shouldRejectForEndstop('G', isEndstopTripped()))
     {
         return;
     }
 
-    const int32_t currentStep = static_cast<int32_t>(currentAngle[motorID]);
+    const int32_t currentStep = static_cast<int32_t>(currentAngle[motorIndex]);
     const MotionPlan plan = planAbsoluteMove(currentStep, targetAngle, rate);
 
     if (currentStep > plan.goalStep)
@@ -257,12 +256,12 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
 
     if (plan.steps > 0)
     {
-        startAngle[motorID] = currentStep;
-        commandDeltaAngle[motorID] = plan.goalStep;
-        startTime[motorID] = esp_timer_get_time();
-        commandDeltaTime[motorID] =
-            plan.durationUs == UINT64_MAX ? UINT64_MAX : startTime[motorID] + plan.durationUs + kCommandTimingMarginUs;
-        commandDone[motorID] = false;
+        startAngle[motorIndex] = currentStep;
+        commandDeltaAngle[motorIndex] = plan.goalStep;
+        startTime[motorIndex] = esp_timer_get_time();
+        commandDeltaTime[motorIndex] =
+            plan.durationUs == UINT64_MAX ? UINT64_MAX : startTime[motorIndex] + plan.durationUs + kCommandTimingMarginUs;
+        commandDone[motorIndex] = false;
 
         PulseEngine::StartConfig pulseConfig = {};
         pulseConfig.pulseCount = plan.steps;
@@ -271,11 +270,11 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
         esp_err_t pulseErr = PulseEngine::startPulses(pulseConfig);
         if (pulseErr != ESP_OK)
         {
-            commandDone[motorID] = true;
+            commandDone[motorIndex] = true;
             ESP_LOGW(
                 TAG,
                 "Pulse start failed: motor=%u steps=%u start=%u end=%u err=%s",
-                static_cast<unsigned>(motorID + 1),
+                static_cast<unsigned>(motorIndex + 1),
                 static_cast<unsigned>(pulseConfig.pulseCount),
                 static_cast<unsigned>(pulseConfig.startSpeedHz),
                 static_cast<unsigned>(pulseConfig.endSpeedHz),
@@ -287,7 +286,7 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
             ESP_LOGI(
                 TAG,
                 "Motion plan goto: motor=%u from=%ld to=%ld steps=%u rate=%u duration=unknown",
-                static_cast<unsigned>(motorID + 1),
+                static_cast<unsigned>(motorIndex + 1),
                 static_cast<long>(currentStep),
                 static_cast<long>(plan.goalStep),
                 static_cast<unsigned>(plan.steps),
@@ -298,7 +297,7 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
             ESP_LOGI(
                 TAG,
                 "Motion plan goto: motor=%u from=%ld to=%ld steps=%u rate=%u duration_ms=%llu",
-                static_cast<unsigned>(motorID + 1),
+                static_cast<unsigned>(motorIndex + 1),
                 static_cast<long>(currentStep),
                 static_cast<long>(plan.goalStep),
                 static_cast<unsigned>(plan.steps),
@@ -308,7 +307,7 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
     }
     else
     {
-        commandDone[motorID] = true;
+        commandDone[motorIndex] = true;
     }
 }
 
@@ -320,11 +319,11 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
  */
 void StepperDriver::motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID)
 {
-    if (motorID > motorsControlled)
-        return;
+    uint8_t motorIndex = 0;
+    if (!tryResolveMotorIndex(motorID, motorsControlled, motorIndex)) return;
+
     if (shouldRejectForEndstop('M', isEndstopTripped())) return;
 
-    const uint8_t motorIndex = motorID - 1;
     const int32_t currentStep = static_cast<int32_t>(currentAngle[motorIndex]);
     const int32_t goalStep = currentStep + deltaAngle;
 
@@ -342,9 +341,8 @@ void StepperDriver::motorStop(signed int wait_time, unsigned short precision, ui
 {
     // wait_time, cycles to wait
     // precision, wait cycles per second
-    if (motorID > motorsControlled)
-        return;
-    motorID--;
+    uint8_t motorIndex = 0;
+    if (!tryResolveMotorIndex(motorID, motorsControlled, motorIndex)) return;
 
     if (shouldRejectForEndstop('S', isEndstopTripped()))
     {
@@ -352,10 +350,10 @@ void StepperDriver::motorStop(signed int wait_time, unsigned short precision, ui
     }
 
     motorDwell = true;
-    startTime[motorID] = esp_timer_get_time();
+    startTime[motorIndex] = esp_timer_get_time();
     const uint64_t dwellDurationUs = planDwellDurationUs(wait_time, precision);
-    commandDeltaTime[motorID] = startTime[motorID] + dwellDurationUs;
-    commandDone[motorID] = false;
+    commandDeltaTime[motorIndex] = startTime[motorIndex] + dwellDurationUs;
+    commandDone[motorIndex] = false;
     
     if(motorSleeping){
         motorSleeping = false;
@@ -376,9 +374,8 @@ void StepperDriver::motorSleep(signed int wait_time, unsigned short precision, u
 {
     // wait_time, cycles to wait
     // precision, wait cycles per second
-    if (motorID > motorsControlled)
-        return;
-    motorID--;
+    uint8_t motorIndex = 0;
+    if (!tryResolveMotorIndex(motorID, motorsControlled, motorIndex)) return;
 
     if (shouldRejectForEndstop('I', isEndstopTripped()))
     {
@@ -386,10 +383,10 @@ void StepperDriver::motorSleep(signed int wait_time, unsigned short precision, u
     }
 
     motorDwell = true;
-    startTime[motorID] = esp_timer_get_time();
+    startTime[motorIndex] = esp_timer_get_time();
     const uint64_t dwellDurationUs = planDwellDurationUs(wait_time, precision);
-    commandDeltaTime[motorID] = startTime[motorID] + dwellDurationUs;
-    commandDone[motorID] = false;
+    commandDeltaTime[motorIndex] = startTime[motorIndex] + dwellDurationUs;
+    commandDone[motorIndex] = false;
 
     motorSleeping = true;
     setSleep(motorSleeping);
@@ -402,12 +399,11 @@ void StepperDriver::motorSleep(signed int wait_time, unsigned short precision, u
  */
 void StepperDriver::abortCommand(uint8_t motorID)
 {
-    if (motorID > motorsControlled)
-        return;
-    motorID--;
+    uint8_t motorIndex = 0;
+    if (!tryResolveMotorIndex(motorID, motorsControlled, motorIndex)) return;
 
     applyPulseProgress(PulseEngine::stop());
-    commandDone[motorID] = true;
+    commandDone[motorIndex] = true;
 }
 
 /**
@@ -579,12 +575,11 @@ void StepperDriver::applyPulseProgress(uint32_t pulsesCompleted)
  * @param motor_id 1-based ID of the motor.
  * @return True if the motor is still executing a command.
  */
-bool StepperDriver::isMotorRunning(uint8_t motor_id)
+bool StepperDriver::isMotorRunning(uint8_t motorID)
 {
-    if (motor_id > motorsControlled)
-        return false;
-    motor_id--;
-    return !commandDone[motor_id];
+    uint8_t motorIndex = 0;
+    if (!tryResolveMotorIndex(motorID, motorsControlled, motorIndex)) return false;
+    return !commandDone[motorIndex];
 }
 
 /**
@@ -706,15 +701,14 @@ void StepperDriver::peekOpForDriver(uint8_t id)
  */
 void StepperDriver::changeMotorSettings(config_setting setting, uint32_t data1, uint32_t data2, uint8_t motorID)
 {
-    if (motorID > motorsControlled)
-        return;
-    motorID--;
+    uint8_t motorIndex = 0;
+    if (!tryResolveMotorIndex(motorID, motorsControlled, motorIndex)) return;
 
     if (setting == config_setting::MICROSTEPPING)
     {
         gpio_set_level(static_cast<gpio_num_t>(GPIO_USTEP_MS2), data1 > 0);
         gpio_set_level(static_cast<gpio_num_t>(GPIO_USTEP_MS1), data1 > 0);
-        ESP_LOGI(TAG, "changeMotorSettings %d %d %d ", data1, data2, motorID);
+        ESP_LOGI(TAG, "changeMotorSettings %d %d %d ", data1, data2, motorIndex);
     }
 }
 
