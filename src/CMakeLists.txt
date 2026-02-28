@@ -9,6 +9,7 @@ idf_component_register(
         "../lib/middleware/CommandLayer.cpp"
         "../lib/IoDrivers/PulseEngine.cpp"
         "../lib/IoDrivers/EndStop.cpp"
+        "../lib/IoDrivers/ServoDriver.cpp"
         "../lib/IoDrivers/StepperDriver.cpp"
         "../lib/protocols/WebCommandDispatcher.cpp"
         "../lib/protocols/WebServer.cpp"

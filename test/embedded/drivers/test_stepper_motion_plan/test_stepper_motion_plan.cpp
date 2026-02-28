@@ -120,6 +120,34 @@ void test_plan_dwell_duration_uses_rate_per_second(void)
     assert_uint64_equal(5000000ULL, duration, "dwell duration from cycles per second");
 }
 
+void test_find_active_pulse_owner_returns_matching_motor_index(void)
+{
+    const uint32_t activeTokens[MAX_STEPPER_MOTORS] = {0, 42, 77};
+    TEST_ASSERT_EQUAL_INT(1, StepperDriver::findActiveRunOwner(42, activeTokens, MAX_STEPPER_MOTORS));
+    TEST_ASSERT_EQUAL_INT(2, StepperDriver::findActiveRunOwner(77, activeTokens, MAX_STEPPER_MOTORS));
+}
+
+void test_find_active_pulse_owner_rejects_zero_and_unknown_tokens(void)
+{
+    const uint32_t activeTokens[MAX_STEPPER_MOTORS] = {11, 0, 33};
+    TEST_ASSERT_EQUAL_INT(-1, StepperDriver::findActiveRunOwner(0, activeTokens, MAX_STEPPER_MOTORS));
+    TEST_ASSERT_EQUAL_INT(-1, StepperDriver::findActiveRunOwner(99, activeTokens, MAX_STEPPER_MOTORS));
+}
+
+void test_opcode_sequence_stale_matches_abort_watermark_contract(void)
+{
+    TEST_ASSERT_FALSE(StepperDriver::isCommandSequenceStale(0, 10));
+    TEST_ASSERT_FALSE(StepperDriver::isCommandSequenceStale(11, 10));
+    TEST_ASSERT_TRUE(StepperDriver::isCommandSequenceStale(10, 10));
+    TEST_ASSERT_TRUE(StepperDriver::isCommandSequenceStale(9, 10));
+}
+
+void test_compute_pulse_end_step_applies_direction_per_motor(void)
+{
+    TEST_ASSERT_EQUAL_INT32(150, StepperDriver::computeRunEndStep(100, true, 50));
+    TEST_ASSERT_EQUAL_INT32(50, StepperDriver::computeRunEndStep(100, false, 50));
+}
+
 void test_plan_dwell_duration_handles_negative_wait_cycles(void)
 {
     const uint64_t duration = StepperDriver::planDwellDurationUs(-2, 1250);
@@ -183,6 +211,10 @@ extern "C" void app_main(void)
     RUN_TEST(test_plan_relative_zero_delta_matches_absolute_path);
     RUN_TEST(test_plan_relative_zero_delta_zero_rate_stays_zero_duration);
     RUN_TEST(test_plan_dwell_duration_uses_rate_per_second);
+    RUN_TEST(test_find_active_pulse_owner_returns_matching_motor_index);
+    RUN_TEST(test_find_active_pulse_owner_rejects_zero_and_unknown_tokens);
+    RUN_TEST(test_opcode_sequence_stale_matches_abort_watermark_contract);
+    RUN_TEST(test_compute_pulse_end_step_applies_direction_per_motor);
     RUN_TEST(test_plan_dwell_duration_handles_negative_wait_cycles);
     RUN_TEST(test_plan_dwell_duration_matches_hz_example);
     RUN_TEST(test_endstop_policy_blocks_motion_commands_when_tripped);

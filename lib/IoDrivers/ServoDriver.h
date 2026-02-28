@@ -6,8 +6,6 @@
  * @brief Declaration of the servo motor driver singleton.
  */
 
-#include <ESP32Servo.h>
-
 #include "MotorDriver.h"
 #include "Op.h"
 #include "CommandLayer.h"
@@ -67,7 +65,7 @@ public:
      * @brief Return the singleton ServoDriver instance.
      * @return Global driver pointer.
      */
-    static ServoDriver *IRAM_ATTR getInstance();
+    static ServoDriver *getInstance();
 
     /**
      * @brief Update servo configuration such as bounds.
@@ -83,17 +81,16 @@ private:
     /**
      * @brief Entry point for the servo RTOS task.
      */
-    static void IRAM_ATTR isrIo(void *);
+    static void isrIo(void *);
     
     /**
      * @brief Driver loop that tracks servo positions and polls commands.
      */
-    void IRAM_ATTR driver();
+    void driver();
 
     static ServoDriver *instance;
     CommandLayer *commandInstance;
     TaskHandle_t motorTaskHandle;
-    Servo servo[MAX_MOTORS];
 
     struct servo_conf
     {
@@ -112,8 +109,12 @@ private:
     int16_t commandDeltaAngle[MAX_MOTORS] = {180};
     uint64_t startTime[MAX_MOTORS] = {90};
     uint64_t commandDeltaTime[MAX_MOTORS] = {0};
+    bool pwmAttached[MAX_MOTORS] = {0};
 
     bool isValidOpCode(Op *);
+    void attachPwmChannel(uint8_t motorIndex);
+    void detachPwmChannel(uint8_t motorIndex);
+    void writeServoAngle(uint8_t motorIndex, int angle);
 
     /**
      * @brief Fetch the next queued command from the command layer.

@@ -31,6 +31,9 @@ public:
     static MotionPlan planAbsoluteMove(int32_t currentStep, int32_t targetStep, uint16_t stepRate);
     static uint64_t planDwellDurationUs(int32_t waitCycles, uint16_t cycleRateHz);
     static bool shouldRejectForEndstop(char opcode, bool endstopTripped);
+    static bool isCommandSequenceStale(uint32_t seq, uint32_t watermark);
+    static int8_t findActiveRunOwner(uint32_t runSeq, const uint32_t *activeRunSeqs, uint8_t motorCount);
+    static int32_t computeRunEndStep(int32_t startStep, bool directionForward, uint32_t pulsesCompleted);
 
     /** @brief Create the singleton and initialize GPIO. */
     StepperDriver();
@@ -113,10 +116,10 @@ private:
     void driver();
 
     static void IRAM_ATTR onPulseRunComplete(uint32_t pulsesCompleted, uint32_t runToken, void *userCtx);
-    void applyPulseProgress(uint32_t pulsesCompleted);
+    void applyPulseProgress(uint8_t motorIndex, uint32_t pulsesCompleted);
     void stopActiveCommandForEndstop();
     bool tryStartPendingPulse(uint8_t motorIndex);
-    uint32_t consumeOpcodeContextSeq(uint8_t motorIndex);
+    uint32_t consumePendingCommandSeq(uint8_t motorIndex);
 
     static StepperDriver *instance;
     CommandLayer *commandInstance;
@@ -134,8 +137,35 @@ private:
         double max = 3000;
     };
 
+    struct CommandSequenceState
+    {
+        // Queue-dispatch sequence state used only for stale-command fencing.
+        uint32_t pendingCommandSeq = 0;
+        uint32_t activeCommandSeq = 0;
+        uint32_t staleCommandFenceSeq = 0;
+    };
+
+    struct PendingPulseRunState
+    {
+        // Latched pulse-run request for a motor while the shared engine is busy or not yet started.
+        bool startPending = false;
+        uint32_t steps = 0;
+        uint16_t rateHz = 0;
+        uint64_t durationUs = 0;
+        uint32_t runSeq = 0;
+        bool directionForward = false;
+    };
+
+    struct ActivePulseRunState
+    {
+        // Single shared PulseEngine ownership record.
+        int8_t motorIndex = -1;
+        uint32_t runSeq = 0;
+        bool directionForward = false;
+    };
+
     stepper_conf confs[MAX_STEPPER_MOTORS];
-    bool motorDwell = false;
+    bool motorDwell[MAX_STEPPER_MOTORS] = {0};
     bool motorSleeping = false;
 
     bool commandDone[MAX_STEPPER_MOTORS] = {1};
@@ -147,15 +177,10 @@ private:
     double commandDeltaAngle[MAX_STEPPER_MOTORS] = {180};
     uint64_t startTime[MAX_STEPPER_MOTORS] = {90};
     uint64_t commandDeltaTime[MAX_STEPPER_MOTORS] = {0};
-    bool pulseStartPending[MAX_STEPPER_MOTORS] = {0};
-    uint32_t pendingPulseSteps[MAX_STEPPER_MOTORS] = {0};
-    uint16_t pendingPulseRateHz[MAX_STEPPER_MOTORS] = {0};
-    uint64_t pendingPulseDurationUs[MAX_STEPPER_MOTORS] = {0};
-    uint32_t opcodeContextSeq[MAX_STEPPER_MOTORS] = {0};
-    uint32_t pendingPulseToken[MAX_STEPPER_MOTORS] = {0};
-    uint32_t activePulseToken[MAX_STEPPER_MOTORS] = {0};
-    uint32_t activeOpcodeSeq[MAX_STEPPER_MOTORS] = {0};
-    uint32_t abortWatermarkSeq[MAX_STEPPER_MOTORS] = {0};
+    PendingPulseRunState pendingRun[MAX_STEPPER_MOTORS] = {};
+    CommandSequenceState commandSeq[MAX_STEPPER_MOTORS] = {};
+    uint32_t activeRunSeq[MAX_STEPPER_MOTORS] = {0};
+    ActivePulseRunState activeRun = {};
     uint64_t degreesToSteps(double);
 
     bool isValidOpCode(Op *);

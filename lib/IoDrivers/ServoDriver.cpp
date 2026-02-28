@@ -3,7 +3,14 @@
  * @brief Implements the servo motor driver singleton logic.
  */
 
+#include <algorithm>
+#include <cstring>
 #include <reent.h>
+
+#include "driver/ledc.h"
+#include "esp_err.h"
+#include "esp_log.h"
+#include "esp_timer.h"
 
 #include "ServoDriver.h"
 #include "OpBuffer.h"
@@ -12,16 +19,58 @@
 #define UPDATE_FREQ 60
 
 #define UPDATE_DWELL 1000 / UPDATE_FREQ
-hw_timer_t *timerDriver = NULL;
+namespace {
+constexpr uint32_t kServoPwmFrequencyHz = 50;
+constexpr ledc_timer_bit_t kServoPwmResolution = LEDC_TIMER_16_BIT;
+constexpr uint32_t kServoPeriodUs = 1000000UL / kServoPwmFrequencyHz;
+constexpr uint32_t kServoMinPulseUs = 500;
+constexpr uint32_t kServoMaxPulseUs = 2400;
+constexpr uint32_t kServoAngleMax = 180;
+constexpr uint32_t kServoDutyMax = (1UL << 16) - 1UL;
+constexpr gpio_num_t kServoPins[MAX_MOTORS] = {
+    GPIO_NUM_32, GPIO_NUM_33, GPIO_NUM_25, GPIO_NUM_26, GPIO_NUM_27,
+    GPIO_NUM_14, GPIO_NUM_12, GPIO_NUM_15, GPIO_NUM_22, GPIO_NUM_21,
+    GPIO_NUM_19, GPIO_NUM_18, GPIO_NUM_4,  GPIO_NUM_16, GPIO_NUM_17,
+};
+
+struct ServoPwmChannelConfig {
+    ledc_mode_t speedMode;
+    ledc_channel_t channel;
+    ledc_timer_t timer;
+};
+
+const char *TAG = "ServoDriver";
+uint8_t sPeekTicks = 5;
+uint8_t sPeekRate = 5;
+
+ServoPwmChannelConfig resolve_pwm_channel(uint8_t motorIndex)
+{
+    if (motorIndex < LEDC_CHANNEL_MAX) {
+        return {LEDC_LOW_SPEED_MODE, static_cast<ledc_channel_t>(motorIndex), LEDC_TIMER_0};
+    }
+
+    return {
+        LEDC_HIGH_SPEED_MODE,
+        static_cast<ledc_channel_t>(motorIndex - LEDC_CHANNEL_MAX),
+        LEDC_TIMER_1,
+    };
+}
+
+uint32_t angle_to_pulse_width_us(int angle)
+{
+    const int clampedAngle = std::clamp(angle, 0, static_cast<int>(kServoAngleMax));
+    const uint32_t spanUs = kServoMaxPulseUs - kServoMinPulseUs;
+    return kServoMinPulseUs +
+           (static_cast<uint32_t>(clampedAngle) * spanUs) / kServoAngleMax;
+}
+
+uint32_t pulse_width_us_to_duty(uint32_t pulseWidthUs)
+{
+    return (pulseWidthUs * kServoDutyMax) / kServoPeriodUs;
+}
+} // namespace
+
 ServoDriver *ServoDriver::instance = NULL;
-CommandLayer *commandInstance = NULL;
-static uint8_t peekTicks = 5;
-static uint8_t peekRate = 5;
-
-uint8_t servoPin[MAX_MOTORS] = {32, 33, 25, 26, 27, 14, 12, 15, 22, 21, 19, 18, 4, 16, 17};
-
-int minUs = 500;
-int maxUs = 2400;
 
 /**
  * @brief Initialize the servo driver and reset pending commands.
@@ -31,7 +80,7 @@ ServoDriver::ServoDriver() : MotorDriver()
     initMotorGpio();
     memset(commandDone, 1, MAX_MOTORS);
     memset(motorDwell, 0, MAX_MOTORS);
-    log_v("Servo Driver Up");
+    ESP_LOGV(TAG, "Servo Driver Up");
 }
 
 /**
@@ -53,9 +102,63 @@ ServoDriver *IRAM_ATTR ServoDriver::getInstance()
  */
 void ServoDriver::initMotorGpio()
 {
-    for(int i=0; i<MAX_MOTORS; i++){
-        servo[i].attach(servoPin[i]);
+    ledc_timer_config_t lowSpeedTimer = {};
+    lowSpeedTimer.speed_mode = LEDC_LOW_SPEED_MODE;
+    lowSpeedTimer.duty_resolution = kServoPwmResolution;
+    lowSpeedTimer.timer_num = LEDC_TIMER_0;
+    lowSpeedTimer.freq_hz = kServoPwmFrequencyHz;
+    lowSpeedTimer.clk_cfg = LEDC_AUTO_CLK;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ledc_timer_config(&lowSpeedTimer));
+
+    ledc_timer_config_t highSpeedTimer = {};
+    highSpeedTimer.speed_mode = LEDC_HIGH_SPEED_MODE;
+    highSpeedTimer.duty_resolution = kServoPwmResolution;
+    highSpeedTimer.timer_num = LEDC_TIMER_1;
+    highSpeedTimer.freq_hz = kServoPwmFrequencyHz;
+    highSpeedTimer.clk_cfg = LEDC_AUTO_CLK;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ledc_timer_config(&highSpeedTimer));
+
+    for (uint8_t i = 0; i < MAX_MOTORS; ++i) {
+        attachPwmChannel(i);
     }
+}
+
+void ServoDriver::attachPwmChannel(uint8_t motorIndex)
+{
+    if (motorIndex >= MAX_MOTORS) return;
+
+    const ServoPwmChannelConfig pwm = resolve_pwm_channel(motorIndex);
+    ledc_channel_config_t channel = {};
+    channel.gpio_num = kServoPins[motorIndex];
+    channel.speed_mode = pwm.speedMode;
+    channel.channel = pwm.channel;
+    channel.intr_type = LEDC_INTR_DISABLE;
+    channel.timer_sel = pwm.timer;
+    channel.duty = 0;
+    channel.hpoint = 0;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ledc_channel_config(&channel));
+    pwmAttached[motorIndex] = true;
+}
+
+void ServoDriver::detachPwmChannel(uint8_t motorIndex)
+{
+    if (motorIndex >= MAX_MOTORS) return;
+    if (!pwmAttached[motorIndex]) return;
+
+    const ServoPwmChannelConfig pwm = resolve_pwm_channel(motorIndex);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ledc_stop(pwm.speedMode, pwm.channel, 0));
+    pwmAttached[motorIndex] = false;
+}
+
+void ServoDriver::writeServoAngle(uint8_t motorIndex, int angle)
+{
+    if (motorIndex >= MAX_MOTORS) return;
+    if (!pwmAttached[motorIndex]) attachPwmChannel(motorIndex);
+
+    const ServoPwmChannelConfig pwm = resolve_pwm_channel(motorIndex);
+    const uint32_t duty = pulse_width_us_to_duty(angle_to_pulse_width_us(angle));
+    if (ledc_set_duty(pwm.speedMode, pwm.channel, duty) != ESP_OK) return;
+    if (ledc_update_duty(pwm.speedMode, pwm.channel) != ESP_OK) return;
 }
 
 /**
@@ -72,7 +175,7 @@ void ServoDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID)
 
     if(motorSleeping[motorID]){
         motorSleeping[motorID] = false;
-        servo[motorID].attach(servoPin[motorID]);
+        attachPwmChannel(motorID);
     }
 
     motorDwell[motorID] = false;
@@ -83,7 +186,9 @@ void ServoDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID)
     commandDeltaTime[motorID] = 1000000 / rate * abs(commandDeltaAngle[motorID]);
 
     commandDone[motorID] = false;
-    log_v("command %d %d %d %d ", startAngle[motorID], commandDeltaAngle[motorID], startTime[motorID], commandDeltaTime[motorID]);
+    ESP_LOGV(TAG, "command %d %d %llu %llu ", startAngle[motorID], commandDeltaAngle[motorID],
+             static_cast<unsigned long long>(startTime[motorID]),
+             static_cast<unsigned long long>(commandDeltaTime[motorID]));
 }
 
 /**
@@ -102,7 +207,7 @@ void ServoDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorID)
 
     if(motorSleeping[motorID]){
         motorSleeping[motorID] = false;
-        servo[motorID].attach(servoPin[motorID]);
+        attachPwmChannel(motorID);
     }
 
     motorDwell[motorID] = false;
@@ -113,7 +218,9 @@ void ServoDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorID)
     commandDeltaTime[motorID] = (uint64_t)commandDeltaAngle[motorID] * rate * 1000000;
 
     commandDone[motorID] = false;
-    log_v("command %d %d %d %d ", startAngle[motorID], commandDeltaAngle[motorID], startTime[motorID], commandDeltaTime[motorID]);
+    ESP_LOGV(TAG, "command %d %d %llu %llu ", startAngle[motorID], commandDeltaAngle[motorID],
+             static_cast<unsigned long long>(startTime[motorID]),
+             static_cast<unsigned long long>(commandDeltaTime[motorID]));
 }
 
 /**
@@ -122,7 +229,7 @@ void ServoDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorID)
  * @param precision Duration of each cycle in milliseconds.
  * @param motorID One-based servo index.
  */
-void ServoDriver::motorStop(signed int wait_time, unsigned short precision, uint8_t motorID)
+void ServoDriver::motorStop(int32_t wait_time, uint16_t precision, uint8_t motorID)
 {
     // wait_time, cycles to wait
     // precision, duration of wait cycle in milliseconds
@@ -132,7 +239,7 @@ void ServoDriver::motorStop(signed int wait_time, unsigned short precision, uint
 
     if(motorSleeping[motorID]){
         motorSleeping[motorID] = false;
-        servo[motorID].attach(servoPin[motorID]);
+        attachPwmChannel(motorID);
     }
 
     motorDwell[motorID] = true;
@@ -141,7 +248,9 @@ void ServoDriver::motorStop(signed int wait_time, unsigned short precision, uint
     commandDeltaTime[motorID] = (abs(wait_time) * precision);
     commandDone[motorID] = false;
 
-    log_v("command %d %d %d %d ", startAngle[motorID], commandDeltaAngle[motorID], startTime[motorID], commandDeltaTime[motorID]);
+    ESP_LOGV(TAG, "command %d %d %llu %llu ", startAngle[motorID], commandDeltaAngle[motorID],
+             static_cast<unsigned long long>(startTime[motorID]),
+             static_cast<unsigned long long>(commandDeltaTime[motorID]));
 }
 
 /**
@@ -164,9 +273,11 @@ void ServoDriver::motorSleep(signed int wait_time, unsigned short precision, uin
     commandDeltaTime[motorID] = (abs(wait_time) * precision);
     commandDone[motorID] = false;
 
-    servo[motorID].detach();
+    detachPwmChannel(motorID);
 
-    log_v("command %d %d %d %d ", startAngle[motorID], commandDeltaAngle[motorID], startTime[motorID], commandDeltaTime[motorID]);
+    ESP_LOGV(TAG, "command %d %d %llu %llu ", startAngle[motorID], commandDeltaAngle[motorID],
+             static_cast<unsigned long long>(startTime[motorID]),
+             static_cast<unsigned long long>(commandDeltaTime[motorID]));
 }
 
 /**
@@ -201,7 +312,9 @@ void ServoDriver::isrStartIoDriver()
  */
 void ServoDriver::isrStopIoDriver()
 {
-    timerStop(timerDriver);
+    for (uint8_t i = 0; i < MAX_MOTORS; ++i) {
+        detachPwmChannel(i);
+    }
 }
 
 /**
@@ -234,11 +347,11 @@ void IRAM_ATTR ServoDriver::driver()
     volatile uint_fast64_t delta;
     while (true)
     {
-        if (peekTicks == 0)
+        if (sPeekTicks == 0)
         {
-            peekTicks = peekRate;
+            sPeekTicks = sPeekRate;
         }
-        peekTicks--;
+        sPeekTicks--;
 
         for (int i = 0; (i < MAX_MOTORS); i++)
         {
@@ -264,10 +377,10 @@ void IRAM_ATTR ServoDriver::driver()
                         angle = commandDeltaAngle[i] + startAngle[i];
                         commandDone[i] = true;
                     }
-                    servo[i].write(angle);
+                    writeServoAngle(static_cast<uint8_t>(i), angle);
                     currentAngle[i] = angle;
                 }
-                if (peekTicks == 0)
+                if (sPeekTicks == 0)
                 {
                     peekOpForDriver(i);
                 }

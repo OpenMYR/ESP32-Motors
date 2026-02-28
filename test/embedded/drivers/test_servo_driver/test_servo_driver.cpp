@@ -1,15 +1,10 @@
 // Includes for unit test framework
-#include <Arduino.h>
 #include <unity.h>
-
-// Includes for project libraries
-//#include <FS.h>
-//#include <WiFi.h>
-#include <ESP32Servo.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 // Includes for this unit test
 #include "ServoDriver.h"
-#include "WifiController.h"  
 
 void setUp(void) {
     // set stuff up here
@@ -29,7 +24,7 @@ void test_servo_singleton() {
 
 void test_servo_inactive_on_init() {
     ServoDriver::getInstance()->isrStartIoDriver();
-    sleep(1);
+    vTaskDelay(pdMS_TO_TICKS(1000));
     for (size_t i = 1; i <= MAX_MOTORS; i++)
     {
         TEST_ASSERT_EQUAL(false, ServoDriver::getInstance()->isMotorRunning(i));
@@ -53,7 +48,7 @@ void test_servo_motorGoTo_wait() {
         TEST_ASSERT_EQUAL(true, ServoDriver::getInstance()->isMotorRunning(i));
     }    
 
-    sleep(5);    
+    vTaskDelay(pdMS_TO_TICKS(5000));
     
     for (size_t i = 1; i <= MAX_MOTORS; i++)
     {
@@ -98,9 +93,9 @@ void test_servo_abortCommand() {
 }
 
 
-void setup()
+extern "C" void app_main(void)
 {
-    delay(2000); // service delay
+    vTaskDelay(pdMS_TO_TICKS(2000));
     UNITY_BEGIN();
     RUN_TEST(test_servo_singleton);
     RUN_TEST(test_servo_inactive_on_init);
@@ -112,8 +107,4 @@ void setup()
     RUN_TEST(test_servo_motorGoTo_wait);
 
     UNITY_END(); // stop unit testing
-}
-
-void loop()
-{
 }

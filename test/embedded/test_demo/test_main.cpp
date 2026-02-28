@@ -1,72 +1,64 @@
-#include <Arduino.h>
 #include <unity.h>
+#include <algorithm>
+#include <cctype>
+#include <string>
 
-//#include <ETH.h>   // Breaks when project jumped to 6.7.0
-#include <WiFi.h>
-#include <WiFiAP.h>
-#include <WiFiClient.h>
-#include <WiFiGeneric.h>
-#include <WiFiMulti.h>
-#include <WiFiScan.h>
-#include <WiFiServer.h>
-#include <WiFiSTA.h>
-#include <WiFiType.h>
-#include <WiFiUdp.h>
-#include <AsyncTCP.h>
-#include "FileIO.h"
-#include "WifiController.h"
-#include "WebServer.h"
-#include "udp_srv.h"
-#include "ServoDriver.h"
-#include "CommandLayer.h"
-#include "OpBuffer.h"
-#include <esp_log.h>
-#include <ESPmDNS.h>
-#include <ArduinoOTA.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
-String STR_TO_TEST;
+namespace {
+std::string g_string_under_test;
+}
 
 void setUp(void) {
-    // set stuff up here
-    STR_TO_TEST = "Hello, world!";
+    g_string_under_test = "Hello, world!";
 }
 
 void tearDown(void) {
-    // clean stuff up here
-    STR_TO_TEST = "";
+    g_string_under_test.clear();
 }
 
 void test_string_concat(void) {
-    String hello = "Hello, ";
-    String world = "world!";
-    TEST_ASSERT_EQUAL_STRING(STR_TO_TEST.c_str(), (hello + world).c_str());
+    const std::string hello = "Hello, ";
+    const std::string world = "world!";
+    TEST_ASSERT_EQUAL_STRING(g_string_under_test.c_str(), (hello + world).c_str());
 }
 
 void test_string_substring(void) {
-    TEST_ASSERT_EQUAL_STRING("Hello", STR_TO_TEST.substring(0, 5).c_str());
+    TEST_ASSERT_EQUAL_STRING("Hello", g_string_under_test.substr(0, 5).c_str());
 }
 
 void test_string_index_of(void) {
-    TEST_ASSERT_EQUAL(7, STR_TO_TEST.indexOf('w'));
+    TEST_ASSERT_EQUAL(7, static_cast<int>(g_string_under_test.find('w')));
 }
 
 void test_string_equal_ignore_case(void) {
-    TEST_ASSERT_TRUE(STR_TO_TEST.equalsIgnoreCase("HELLO, WORLD!"));
+    std::string upper = g_string_under_test;
+    std::transform(
+        upper.begin(),
+        upper.end(),
+        upper.begin(),
+        [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+    TEST_ASSERT_EQUAL_STRING("HELLO, WORLD!", upper.c_str());
 }
 
 void test_string_to_upper_case(void) {
-    STR_TO_TEST.toUpperCase();
-    TEST_ASSERT_EQUAL_STRING("HELLO, WORLD!", STR_TO_TEST.c_str());
+    std::transform(
+        g_string_under_test.begin(),
+        g_string_under_test.end(),
+        g_string_under_test.begin(),
+        [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+    TEST_ASSERT_EQUAL_STRING("HELLO, WORLD!", g_string_under_test.c_str());
 }
 
 void test_string_replace(void) {
-    STR_TO_TEST.replace('!', '?');
-    TEST_ASSERT_EQUAL_STRING("Hello, world?", STR_TO_TEST.c_str());
+    std::replace(g_string_under_test.begin(), g_string_under_test.end(), '!', '?');
+    TEST_ASSERT_EQUAL_STRING("Hello, world?", g_string_under_test.c_str());
 }
 
-void setup()
+extern "C" void app_main(void)
 {
-    delay(2000); // service delay
+    vTaskDelay(pdMS_TO_TICKS(2000));
     UNITY_BEGIN();
 
     RUN_TEST(test_string_concat);
@@ -77,8 +69,4 @@ void setup()
     RUN_TEST(test_string_replace);
 
     UNITY_END(); // stop unit testing
-}
-
-void loop()
-{
 }

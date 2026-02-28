@@ -1,13 +1,10 @@
 // Includes for unit test framework
-#include <Arduino.h>
 #include <unity.h>
-
-// Includes for project libraries
-#include <FS.h>
-#include <WiFi.h>
 
 // Includes for this unit test
 #include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
+#include <freertos/task.h>
 
 /*
  * Intent of these test are not to fully test FreeRTOS queue functionality.
@@ -15,7 +12,7 @@
  *     For example the include path has changed overtime 
  */
 
-xQueueHandle _queue;
+QueueHandle_t _queue = nullptr;
 uint8_t _queueSize = 0;
 uint32_t _queueMaxTestWaitTicks = 20; 
 
@@ -59,7 +56,6 @@ void dequeue_from_empty_queue(void){
 
 void overfill_queue(void){
     bool sendBool = true;
-    bool recvBool = false;
 
     // Fill the queue
     for (size_t i = 0; i < _queueSize; i++)
@@ -81,9 +77,9 @@ void clear_queue(void){
 
 }
 
-void setup()
+extern "C" void app_main(void)
 {
-    delay(2000); // service delay
+    vTaskDelay(pdMS_TO_TICKS(2000));
     UNITY_BEGIN();
 
     RUN_TEST(setup_new_queue);
@@ -94,8 +90,4 @@ void setup()
 
 
     UNITY_END(); // stop unit testing
-}
-
-void loop()
-{
 }

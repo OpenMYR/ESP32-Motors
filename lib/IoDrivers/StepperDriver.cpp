@@ -22,6 +22,13 @@
 
 #define UPDATE_DWELL 1000 / UPDATE_FREQ
 #define motorInterfaceType 1
+#define GPIO_STEP 16
+#define GPIO_STEP_ENABLE 27
+#define GPIO_STEP_DIR 13
+#define GPIO_USTEP_MS1 12
+#define GPIO_USTEP_MS2 14
+#define GPIO_USTEP_MS3 2
+#define MAXMICROSTEPS 32
 
 namespace {
 const char *TAG = "StepperDriver";
@@ -48,40 +55,45 @@ bool sequence_is_after(uint32_t seq, uint32_t watermark)
 {
     return static_cast<int32_t>(seq - watermark) > 0;
 }
-
-bool sequence_is_stale(uint32_t seq, uint32_t watermark)
-{
-    if (seq == 0) return false;
-    return !sequence_is_after(seq, watermark);
-}
 } // namespace
 
 bool StepperDriver::tryStartPendingPulse(uint8_t motorIndex)
 {
     if (motorIndex >= static_cast<uint8_t>(motorsControlled)) return false;
-    if (!pulseStartPending[motorIndex]) return true;
-    if (pendingPulseSteps[motorIndex] == 0 || pendingPulseRateHz[motorIndex] == 0)
+    if (!pendingRun[motorIndex].startPending) return true;
+    if (pendingRun[motorIndex].steps == 0 || pendingRun[motorIndex].rateHz == 0)
     {
-        pulseStartPending[motorIndex] = false;
+        pendingRun[motorIndex].startPending = false;
         commandDone[motorIndex] = true;
         return false;
     }
 
     PulseEngine::StartConfig pulseConfig = {};
-    pulseConfig.pulseCount = pendingPulseSteps[motorIndex];
-    pulseConfig.startSpeedHz = pendingPulseRateHz[motorIndex];
-    pulseConfig.endSpeedHz = pendingPulseRateHz[motorIndex];
-    pulseConfig.runToken = pendingPulseToken[motorIndex];
+    pulseConfig.pulseCount = pendingRun[motorIndex].steps;
+    pulseConfig.startSpeedHz = pendingRun[motorIndex].rateHz;
+    pulseConfig.endSpeedHz = pendingRun[motorIndex].rateHz;
+    pulseConfig.runToken = pendingRun[motorIndex].runSeq;
 
+    if (PulseEngine::isRunning())
+    {
+        // TODO(STEPPER-MULTI-CHANNEL): Replace the shared singleton PulseEngine with per-motor/channel ownership if simultaneous multi-motor stepping is required.
+        commandDeltaTime[motorIndex] = UINT64_MAX;
+        return false;
+    }
+
+    gpio_set_level(static_cast<gpio_num_t>(GPIO_STEP_DIR), pendingRun[motorIndex].directionForward);
     const esp_err_t pulseErr = PulseEngine::startPulses(pulseConfig);
     if (pulseErr == ESP_OK)
     {
         startTime[motorIndex] = esp_timer_get_time();
-        commandDeltaTime[motorIndex] = pendingPulseDurationUs[motorIndex] == UINT64_MAX
+        commandDeltaTime[motorIndex] = pendingRun[motorIndex].durationUs == UINT64_MAX
                                            ? UINT64_MAX
-                                           : (startTime[motorIndex] + pendingPulseDurationUs[motorIndex] + kCommandTimingMarginUs);
-        activePulseToken[motorIndex] = pendingPulseToken[motorIndex];
-        pulseStartPending[motorIndex] = false;
+                                           : (startTime[motorIndex] + pendingRun[motorIndex].durationUs + kCommandTimingMarginUs);
+        activeRunSeq[motorIndex] = pendingRun[motorIndex].runSeq;
+        activeRun.motorIndex = static_cast<int8_t>(motorIndex);
+        activeRun.runSeq = pendingRun[motorIndex].runSeq;
+        activeRun.directionForward = pendingRun[motorIndex].directionForward;
+        pendingRun[motorIndex].startPending = false;
         return true;
     }
 
@@ -92,8 +104,8 @@ bool StepperDriver::tryStartPendingPulse(uint8_t motorIndex)
     }
 
     commandDone[motorIndex] = true;
-    pulseStartPending[motorIndex] = false;
-    pendingPulseToken[motorIndex] = 0;
+    pendingRun[motorIndex].startPending = false;
+    pendingRun[motorIndex].runSeq = 0;
     ESP_LOGW(
         TAG,
         "Pulse start failed terminally: motor=%u steps=%u rate=%u err=%s",
@@ -107,14 +119,6 @@ bool StepperDriver::tryStartPendingPulse(uint8_t motorIndex)
 StepperDriver *StepperDriver::instance = nullptr;
 static uint8_t peekTicks = 5;
 static uint8_t peekRate = 5;
-
-#define GPIO_STEP 16
-#define GPIO_STEP_ENABLE 27
-#define GPIO_STEP_DIR 13
-#define GPIO_USTEP_MS1 12
-#define GPIO_USTEP_MS2 14
-#define GPIO_USTEP_MS3 2
-#define MAXMICROSTEPS 32
 
 bool const positiveDirection = true;
 uint32_t direction = 0;
@@ -146,6 +150,31 @@ StepperDriver *IRAM_ATTR StepperDriver::getInstance()
     }
 
     return instance;
+}
+
+bool StepperDriver::isCommandSequenceStale(uint32_t seq, uint32_t watermark)
+{
+    if (seq == 0) return false;
+    return !sequence_is_after(seq, watermark);
+}
+
+int8_t StepperDriver::findActiveRunOwner(uint32_t runToken, const uint32_t *activeRunSeqs, uint8_t motorCount)
+{
+    if (runToken == 0 || activeRunSeqs == nullptr) return -1;
+
+    for (uint8_t i = 0; i < motorCount; ++i)
+    {
+        if (activeRunSeqs[i] == runToken) return static_cast<int8_t>(i);
+    }
+
+    return -1;
+}
+
+int32_t StepperDriver::computeRunEndStep(int32_t startStep, bool directionForward, uint32_t pulsesCompleted)
+{
+    const int32_t signedDelta =
+        directionForward ? static_cast<int32_t>(pulsesCompleted) : -static_cast<int32_t>(pulsesCompleted);
+    return startStep + signedDelta;
 }
 
 StepperDriver::MotionPlan StepperDriver::planRelativeMove(int32_t currentStep, int32_t deltaStep, uint16_t stepRate)
@@ -241,14 +270,14 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
 {
     uint8_t motorIndex = 0;
     if (!tryResolveMotorIndex(motorID, motorsControlled, motorIndex)) return;
-    const uint32_t opcodeSeq = consumeOpcodeContextSeq(motorIndex);
-    if (sequence_is_stale(opcodeSeq, abortWatermarkSeq[motorIndex]))
+    const uint32_t acceptedCommandSeq = consumePendingCommandSeq(motorIndex);
+    if (isCommandSequenceStale(acceptedCommandSeq, commandSeq[motorIndex].staleCommandFenceSeq))
     {
         commandDone[motorIndex] = true;
-        pulseStartPending[motorIndex] = false;
+        pendingRun[motorIndex].startPending = false;
         return;
     }
-    activeOpcodeSeq[motorIndex] = opcodeSeq;
+    commandSeq[motorIndex].activeCommandSeq = acceptedCommandSeq;
 
     if (shouldRejectForEndstop('G', isEndstopTripped(motorID)))
     {
@@ -260,31 +289,30 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
 
     if (currentStep > plan.goalStep)
     {
-        direction = !positiveDirection;
+        pendingRun[motorIndex].directionForward = !positiveDirection;
     }
-    else if (currentStep < plan.goalStep)
+    else
     {
-        direction = positiveDirection;
+        pendingRun[motorIndex].directionForward = positiveDirection;
     }
-    gpio_set_level(static_cast<gpio_num_t>(GPIO_STEP_DIR), direction);
 
     if(motorSleeping){
         motorSleeping = false;
         setSleep(motorSleeping);
     }
 
-    motorDwell = false;
+    motorDwell[motorIndex] = false;
 
     if (plan.steps > 0)
     {
         startAngle[motorIndex] = currentStep;
         commandDeltaAngle[motorIndex] = plan.goalStep;
         commandDone[motorIndex] = false;
-        pendingPulseSteps[motorIndex] = plan.steps;
-        pendingPulseRateHz[motorIndex] = rate;
-        pendingPulseDurationUs[motorIndex] = plan.durationUs;
-        pendingPulseToken[motorIndex] = opcodeSeq;
-        pulseStartPending[motorIndex] = true;
+        pendingRun[motorIndex].steps = plan.steps;
+        pendingRun[motorIndex].rateHz = rate;
+        pendingRun[motorIndex].durationUs = plan.durationUs;
+        pendingRun[motorIndex].runSeq = acceptedCommandSeq;
+        pendingRun[motorIndex].startPending = true;
         commandDeltaTime[motorIndex] = UINT64_MAX;
         (void)tryStartPendingPulse(motorIndex);
         if (plan.durationUs == UINT64_MAX)
@@ -349,35 +377,40 @@ void StepperDriver::motorStop(signed int wait_time, unsigned short precision, ui
     // precision, wait cycles per second
     uint8_t motorIndex = 0;
     if (!tryResolveMotorIndex(motorID, motorsControlled, motorIndex)) return;
-    const uint32_t opcodeSeq = consumeOpcodeContextSeq(motorIndex);
-    if (sequence_is_stale(opcodeSeq, abortWatermarkSeq[motorIndex]))
+    const uint32_t acceptedCommandSeq = consumePendingCommandSeq(motorIndex);
+    if (isCommandSequenceStale(acceptedCommandSeq, commandSeq[motorIndex].staleCommandFenceSeq))
     {
         commandDone[motorIndex] = true;
-        pulseStartPending[motorIndex] = false;
+        pendingRun[motorIndex].startPending = false;
         return;
     }
-    activeOpcodeSeq[motorIndex] = opcodeSeq;
+    commandSeq[motorIndex].activeCommandSeq = acceptedCommandSeq;
 
     if (shouldRejectForEndstop('S', isEndstopTripped(motorID)))
     {
         return;
     }
 
-    motorDwell = true;
+    motorDwell[motorIndex] = true;
     startTime[motorIndex] = esp_timer_get_time();
     const uint64_t dwellDurationUs = planDwellDurationUs(wait_time, precision);
     commandDeltaTime[motorIndex] = startTime[motorIndex] + dwellDurationUs;
     commandDone[motorIndex] = false;
-    pulseStartPending[motorIndex] = false;
-    pendingPulseToken[motorIndex] = 0;
-    activePulseToken[motorIndex] = 0;
+    pendingRun[motorIndex].startPending = false;
+    pendingRun[motorIndex].runSeq = 0;
     
     if(motorSleeping){
         motorSleeping = false;
         setSleep(motorSleeping);
     }
 	
-    PulseEngine::stop();
+    if (activeRun.motorIndex == static_cast<int8_t>(motorIndex))
+    {
+        applyPulseProgress(motorIndex, PulseEngine::stop());
+        activeRun.motorIndex = -1;
+        activeRun.runSeq = 0;
+        activeRunSeq[motorIndex] = 0;
+    }
 
 }
 
@@ -393,28 +426,34 @@ void StepperDriver::motorSleep(signed int wait_time, unsigned short precision, u
     // precision, wait cycles per second
     uint8_t motorIndex = 0;
     if (!tryResolveMotorIndex(motorID, motorsControlled, motorIndex)) return;
-    const uint32_t opcodeSeq = consumeOpcodeContextSeq(motorIndex);
-    if (sequence_is_stale(opcodeSeq, abortWatermarkSeq[motorIndex]))
+    const uint32_t acceptedCommandSeq = consumePendingCommandSeq(motorIndex);
+    if (isCommandSequenceStale(acceptedCommandSeq, commandSeq[motorIndex].staleCommandFenceSeq))
     {
         commandDone[motorIndex] = true;
-        pulseStartPending[motorIndex] = false;
+        pendingRun[motorIndex].startPending = false;
         return;
     }
-    activeOpcodeSeq[motorIndex] = opcodeSeq;
+    commandSeq[motorIndex].activeCommandSeq = acceptedCommandSeq;
 
     if (shouldRejectForEndstop('I', isEndstopTripped(motorID)))
     {
         return;
     }
 
-    motorDwell = true;
+    motorDwell[motorIndex] = true;
     startTime[motorIndex] = esp_timer_get_time();
     const uint64_t dwellDurationUs = planDwellDurationUs(wait_time, precision);
     commandDeltaTime[motorIndex] = startTime[motorIndex] + dwellDurationUs;
     commandDone[motorIndex] = false;
-    pulseStartPending[motorIndex] = false;
-    pendingPulseToken[motorIndex] = 0;
-    activePulseToken[motorIndex] = 0;
+    pendingRun[motorIndex].startPending = false;
+    pendingRun[motorIndex].runSeq = 0;
+    if (activeRun.motorIndex == static_cast<int8_t>(motorIndex))
+    {
+        applyPulseProgress(motorIndex, PulseEngine::stop());
+        activeRun.motorIndex = -1;
+        activeRun.runSeq = 0;
+        activeRunSeq[motorIndex] = 0;
+    }
 
     motorSleeping = true;
     setSleep(motorSleeping);
@@ -429,15 +468,23 @@ void StepperDriver::abortCommand(uint8_t motorID)
 {
     uint8_t motorIndex = 0;
     if (!tryResolveMotorIndex(motorID, motorsControlled, motorIndex)) return;
-    const uint32_t abortSeq = consumeOpcodeContextSeq(motorIndex);
-    if (sequence_is_after(abortSeq, abortWatermarkSeq[motorIndex])) abortWatermarkSeq[motorIndex] = abortSeq;
-    if (abortSeq == 0 && sequence_is_after(activeOpcodeSeq[motorIndex], abortWatermarkSeq[motorIndex]))
-        abortWatermarkSeq[motorIndex] = activeOpcodeSeq[motorIndex];
+    const uint32_t abortSeq = consumePendingCommandSeq(motorIndex);
+    if (sequence_is_after(abortSeq, commandSeq[motorIndex].staleCommandFenceSeq))
+        commandSeq[motorIndex].staleCommandFenceSeq = abortSeq;
+    if (abortSeq == 0 &&
+        sequence_is_after(commandSeq[motorIndex].activeCommandSeq, commandSeq[motorIndex].staleCommandFenceSeq))
+        commandSeq[motorIndex].staleCommandFenceSeq = commandSeq[motorIndex].activeCommandSeq;
 
-    applyPulseProgress(PulseEngine::stop());
-    pulseStartPending[motorIndex] = false;
-    pendingPulseToken[motorIndex] = 0;
-    activePulseToken[motorIndex] = 0;
+    if (activeRun.motorIndex == static_cast<int8_t>(motorIndex))
+    {
+        applyPulseProgress(motorIndex, PulseEngine::stop());
+        activeRun.motorIndex = -1;
+        activeRun.runSeq = 0;
+        activeRunSeq[motorIndex] = 0;
+    }
+    pendingRun[motorIndex].startPending = false;
+    pendingRun[motorIndex].runSeq = 0;
+    motorDwell[motorIndex] = false;
     commandDone[motorIndex] = true;
 }
 
@@ -445,7 +492,7 @@ void StepperDriver::setOpcodeContext(uint32_t op_seq, uint8_t motor_id)
 {
     uint8_t motorIndex = 0;
     if (!tryResolveMotorIndex(motor_id, motorsControlled, motorIndex)) return;
-    opcodeContextSeq[motorIndex] = op_seq;
+    commandSeq[motorIndex].pendingCommandSeq = op_seq;
 }
 
 /**
@@ -486,7 +533,13 @@ bool IRAM_ATTR StepperDriver::isEndstopTripped()
  */
 void StepperDriver::isrStopIoDriver()
 {
-    applyPulseProgress(PulseEngine::stop());
+    if (activeRun.motorIndex < 0) return;
+
+    const uint8_t motorIndex = static_cast<uint8_t>(activeRun.motorIndex);
+    applyPulseProgress(motorIndex, PulseEngine::stop());
+    activeRunSeq[motorIndex] = 0;
+    activeRun.motorIndex = -1;
+    activeRun.runSeq = 0;
 }
 
 /**
@@ -511,30 +564,45 @@ void IRAM_ATTR StepperDriver::onPulseRunComplete(uint32_t pulsesCompleted, uint3
 {
     StepperDriver *driver = static_cast<StepperDriver *>(userCtx);
     if (driver == nullptr) return;
-    if (runToken != driver->activePulseToken[0]) return;
+    int8_t owner = findActiveRunOwner(runToken, driver->activeRunSeq, static_cast<uint8_t>(driver->motorsControlled));
+    // Direct driver calls bypass CommandLayer sequencing, so an accepted run may legitimately carry token 0.
+    if (owner < 0 && runToken == 0) owner = driver->activeRun.motorIndex;
+    if (owner < 0) return;
 
-    driver->applyPulseProgress(pulsesCompleted);
-    driver->activePulseToken[0] = 0;
-    driver->pulseStartPending[0] = false;
-    driver->commandDone[0] = true;
+    const uint8_t motorIndex = static_cast<uint8_t>(owner);
+    driver->applyPulseProgress(motorIndex, pulsesCompleted);
+    driver->activeRunSeq[motorIndex] = 0;
+    driver->activeRun.motorIndex = -1;
+    driver->activeRun.runSeq = 0;
+    driver->pendingRun[motorIndex].startPending = false;
+    driver->commandDone[motorIndex] = true;
 }
 
 void StepperDriver::stopActiveCommandForEndstop()
 {
-    if (motorDwell) return;
-
     bool stoppedAny = false;
+    int8_t activeOwner = activeRun.motorIndex;
+    uint32_t pulsesCompleted = 0;
+
+    if (activeOwner >= 0) pulsesCompleted = PulseEngine::stop();
+
     for (int i = 0; i < motorsControlled; ++i)
     {
         if (commandDone[i]) continue;
 
-        applyPulseProgress(PulseEngine::stop());
-        pulseStartPending[i] = false;
-        pendingPulseToken[i] = 0;
-        activePulseToken[i] = 0;
+        if (i == activeOwner)
+        {
+            applyPulseProgress(static_cast<uint8_t>(i), pulsesCompleted);
+        }
+        pendingRun[i].startPending = false;
+        pendingRun[i].runSeq = 0;
+        activeRunSeq[i] = 0;
+        motorDwell[i] = false;
         commandDone[i] = true;
         stoppedAny = true;
     }
+    activeRun.motorIndex = -1;
+    activeRun.runSeq = 0;
 
     if (!stoppedAny) return;
     motorSleeping = true;
@@ -542,12 +610,18 @@ void StepperDriver::stopActiveCommandForEndstop()
     ESP_LOGW(TAG, "Command: Stopped by endstop");
 }
 
-void StepperDriver::applyPulseProgress(uint32_t pulsesCompleted)
+void StepperDriver::applyPulseProgress(uint8_t motorIndex, uint32_t pulsesCompleted)
 {
-    const int32_t startStep = static_cast<int32_t>(startAngle[0]);
-    const int32_t signedDelta = direction == positiveDirection ? static_cast<int32_t>(pulsesCompleted) : -static_cast<int32_t>(pulsesCompleted);
-    location = startStep + signedDelta;
-    currentAngle[0] = location;
+    if (motorIndex >= static_cast<uint8_t>(motorsControlled)) return;
+
+    const int32_t startStep = static_cast<int32_t>(startAngle[motorIndex]);
+    // Use the active run direction while a run owns the engine; otherwise fall back to the queued direction
+    // that was latched for the most recent command on this motor.
+    const bool directionForward =
+        activeRun.motorIndex == static_cast<int8_t>(motorIndex) ? activeRun.directionForward : pendingRun[motorIndex].directionForward;
+    const int32_t endStep = computeRunEndStep(startStep, directionForward, pulsesCompleted);
+    if (motorIndex == 0) location = endStep;
+    currentAngle[motorIndex] = endStep;
 }
 
 /**
@@ -579,10 +653,10 @@ void IRAM_ATTR StepperDriver::driver()
         {
             if (!commandDone[i])
             {
-                if (pulseStartPending[i])
+                if (pendingRun[i].startPending)
                 {
                     (void)tryStartPendingPulse(static_cast<uint8_t>(i));
-                    if (pulseStartPending[i])
+                    if (pendingRun[i].startPending)
                     {
                         if (peekTicks == 0)
                         {
@@ -595,7 +669,7 @@ void IRAM_ATTR StepperDriver::driver()
                 PulseEngine::service();
                 if (commandDone[i]) continue;
 
-                if (!motorDwell && isEndstopTripped(static_cast<uint8_t>(i + 1)))
+                if (!motorDwell[i] && isEndstopTripped(static_cast<uint8_t>(i + 1)))
                 {
                     stopActiveCommandForEndstop();
                     continue;
@@ -604,7 +678,7 @@ void IRAM_ATTR StepperDriver::driver()
                 const uint64_t nowUs = static_cast<uint64_t>(esp_timer_get_time());
                 if (nowUs >= commandDeltaTime[i])
                 {
-                    if (motorDwell)
+                    if (motorDwell[i])
                     {
                     }
                     else
@@ -620,9 +694,15 @@ void IRAM_ATTR StepperDriver::driver()
                             continue;
                         }
 
-                        const uint32_t pulsesCompleted = PulseEngine::stop();
-                        applyPulseProgress(pulsesCompleted);
-                        activePulseToken[i] = 0;
+                        const bool ownsActivePulse = activeRun.motorIndex == static_cast<int8_t>(i);
+                        const uint32_t pulsesCompleted = ownsActivePulse ? PulseEngine::stop() : 0;
+                        applyPulseProgress(static_cast<uint8_t>(i), pulsesCompleted);
+                        activeRunSeq[i] = 0;
+                        if (ownsActivePulse)
+                        {
+                            activeRun.motorIndex = -1;
+                            activeRun.runSeq = 0;
+                        }
                         ESP_LOGE(TAG, "Command: Timed out");
                         ESP_LOGE(
                             TAG,
@@ -645,6 +725,7 @@ void IRAM_ATTR StepperDriver::driver()
                                 static_cast<unsigned long long>(commandDeltaTime[i] - startTime[i]));
                         // #endregion
                     }
+                    motorDwell[i] = false;
                     commandDone[i] = true;
                     ESP_LOGV(TAG, "Command: Done");
                 }
@@ -666,10 +747,10 @@ void IRAM_ATTR StepperDriver::driver()
     vTaskDelete(nullptr);
 }
 
-uint32_t StepperDriver::consumeOpcodeContextSeq(uint8_t motorIndex)
+uint32_t StepperDriver::consumePendingCommandSeq(uint8_t motorIndex)
 {
-    const uint32_t seq = opcodeContextSeq[motorIndex];
-    opcodeContextSeq[motorIndex] = 0;
+    const uint32_t seq = commandSeq[motorIndex].pendingCommandSeq;
+    commandSeq[motorIndex].pendingCommandSeq = 0;
     return seq;
 }
 
