@@ -53,6 +53,7 @@ public:
         uint32_t cruiseSpeedHz = 0;
         uint32_t accelHzPerSec2 = 0;
         bool useTrapezoid = false;
+        uint16_t frameMaxPulses = 0;
     };
 
     struct Stats

@@ -29,6 +29,7 @@ volatile uint32_t gTargetPulses = 0;
 volatile uint32_t gPulsesCompleted = 0;
 volatile uint32_t gSpeedSwitchPulse = 0;
 volatile bool gEndSpeedPending = false;
+volatile uint32_t gActiveRunToken = 0;
 
 uint32_t gStartSpeedHz = 0;
 uint32_t gEndSpeedHz = 0;
@@ -104,7 +105,7 @@ bool IRAM_ATTR pulse_watch_handler(pcnt_unit_handle_t unit, const pcnt_watch_eve
     gRunning = false;
     stop_pwm();
     if (gCompletionCallback != nullptr) {
-        gCompletionCallback(gPulsesCompleted, gCompletionCtx);
+        gCompletionCallback(gPulsesCompleted, gActiveRunToken, gCompletionCtx);
     }
     return false;
 }
@@ -193,6 +194,7 @@ esp_err_t PulseEngine::startPulses(const StartConfig &config)
     gEndSpeedHz = endHz == 0 ? gStartSpeedHz : endHz;
 
     gTargetPulses = config.pulseCount;
+    gActiveRunToken = config.runToken;
     gPulsesCompleted = 0;
     gSpeedSwitchPulse = gStartSpeedHz == gEndSpeedHz ? 0 : (config.pulseCount / 2);
     gEndSpeedPending = false;
@@ -222,6 +224,7 @@ uint32_t PulseEngine::stop()
     gRunning = false;
     gSpeedSwitchPulse = 0;
     gEndSpeedPending = false;
+    gActiveRunToken = 0;
     stop_pwm();
     return gPulsesCompleted;
 }

@@ -104,8 +104,8 @@ void CommandLayer::FillDriverFromQueue()
 void CommandLayer::parseSubmittOp(uint8_t id, Op *op)
 {
     (void)id;
-    if (op == nullptr)
-        return;
+    if (op == nullptr) return;
+    CommandLayer::driver->setOpcodeContext(op->opSeq, op->motorID);
     //log_i("Code: %d", (int)(op->opcode));
     switch (op->opcode)
     {
@@ -134,6 +134,11 @@ void CommandLayer::parseSubmittOp(uint8_t id, Op *op)
         opcodeMotorSetting(MotorDriver::config_setting::MICROSTEPPING, op->stepRate, op->motorID, op->motorID);
         break;
     }
+    case 'K':
+    {
+        opcodeAbortCommand(op->motorID);
+        break;
+    }
     default:
         //log_i("parseSubmittOp Unknown packet");
         break;
@@ -155,6 +160,7 @@ void CommandLayer::peekNextOp(uint8_t driverId)
 
     if (peekedOp->opcode == 'K')
     {
+        CommandLayer::driver->setOpcodeContext(peekedOp->opSeq, driverId);
         opcodeAbortCommand(driverId);
     }
 }

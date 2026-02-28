@@ -181,6 +181,35 @@ void test_trapezoid_model_reports_all_segments_and_exact_step_count(void)
     TEST_ASSERT_TRUE(decelSteps > 0);
 }
 
+void test_model_respects_frame_max_pulses_limit(void)
+{
+    PulseEngineRmtModel model = {};
+
+    PulseEngineRmtModel::BuildConfig config = {};
+    config.resolutionHz = 1000000;
+    config.pulseHighTicks = 2;
+    config.pulseCount = 103;
+    config.startSpeedHz = 10000;
+    config.endSpeedHz = 10000;
+    config.frameMaxPulses = 20;
+
+    TEST_ASSERT_TRUE(model.begin(config));
+
+    uint32_t pulses = 0;
+    uint32_t frameCount = 0;
+
+    PulseEngineRmtFrame frame = {};
+    while (model.buildNextFrame(&frame))
+    {
+        TEST_ASSERT_TRUE(frame.pulseCount <= config.frameMaxPulses);
+        pulses = pulses + frame.pulseCount;
+        frameCount = frameCount + 1;
+    }
+
+    TEST_ASSERT_EQUAL_UINT32(config.pulseCount, pulses);
+    TEST_ASSERT_TRUE(frameCount >= 6);
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -190,5 +219,6 @@ int main(int argc, char **argv)
     RUN_TEST(test_model_splits_long_low_duration_without_losing_ticks);
     RUN_TEST(test_sequencer_chains_frames_and_finishes_exact_pulse_count);
     RUN_TEST(test_trapezoid_model_reports_all_segments_and_exact_step_count);
+    RUN_TEST(test_model_respects_frame_max_pulses_limit);
     return UNITY_END();
 }

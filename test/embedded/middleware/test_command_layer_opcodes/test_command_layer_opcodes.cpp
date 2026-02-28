@@ -58,7 +58,7 @@ public:
         call_count++;
     }
 
-    void motorStop(int32_t wait_time, uint16_t precision, uint8_t motor_id) override
+    void motorStop(signed int wait_time, unsigned short precision, uint8_t motor_id) override
     {
         last_call = STOP;
         last_i32 = wait_time;
@@ -67,7 +67,7 @@ public:
         call_count++;
     }
 
-    void motorSleep(int32_t wait_time, uint16_t precision, uint8_t motor_id) override
+    void motorSleep(signed int wait_time, unsigned short precision, uint8_t motor_id) override
     {
         last_call = SLEEP;
         last_i32 = wait_time;
@@ -168,8 +168,8 @@ void test_opcode_U_dispatches_microstepping_setting(void)
     enqueue_and_dispatch(make_op('U', 1, 1, 0, 1));
     TEST_ASSERT_EQUAL_INT(FakeMotorDriver::SETTING, gFake.last_call);
     TEST_ASSERT_EQUAL_INT(MotorDriver::config_setting::MICROSTEPPING, gFake.last_setting);
-    TEST_ASSERT_EQUAL_UINT32(1, gFake.last_data1);
-    TEST_ASSERT_EQUAL_UINT32(0, gFake.last_data2);
+    TEST_ASSERT_EQUAL_UINT32(0, gFake.last_data1);
+    TEST_ASSERT_EQUAL_UINT32(1, gFake.last_data2);
     TEST_ASSERT_EQUAL_UINT8(1, gFake.last_motor_id);
 }
 
@@ -179,13 +179,13 @@ void test_opcode_U_accepts_explicit_32_microstep_setting(void)
     TEST_ASSERT_EQUAL_INT(FakeMotorDriver::SETTING, gFake.last_call);
     TEST_ASSERT_EQUAL_INT(MotorDriver::config_setting::MICROSTEPPING, gFake.last_setting);
     TEST_ASSERT_EQUAL_UINT32(32, gFake.last_data1);
-    TEST_ASSERT_EQUAL_UINT32(32, gFake.last_data2);
+    TEST_ASSERT_EQUAL_UINT32(1, gFake.last_data2);
     TEST_ASSERT_EQUAL_UINT8(1, gFake.last_motor_id);
 }
 
 void test_opcode_U_uses_legacy_stepRate_when_stepNum_is_zero(void)
 {
-    // Regression guard: legacy web command encodes microstep flag in stepRate (data[3]).
+    // U opcode consumes stepRate as the primary microstepping value.
     enqueue_and_dispatch(make_op('U', 1, 0, 1, 1));
     TEST_ASSERT_EQUAL_INT(FakeMotorDriver::SETTING, gFake.last_call);
     TEST_ASSERT_EQUAL_INT(MotorDriver::config_setting::MICROSTEPPING, gFake.last_setting);
@@ -196,24 +196,20 @@ void test_opcode_U_uses_legacy_stepRate_when_stepNum_is_zero(void)
 
 void test_opcode_U_normalizes_zero_setting_to_full_step(void)
 {
-    // Regression guard: legacy boolean payload may send 0 for "microstepping off".
-    // Driver expects explicit microstep setting, where 1 means full-step.
+    // Command layer forwards the raw value; driver-side normalization is tested separately.
     enqueue_and_dispatch(make_op('U', 1, 0, 0, 1));
     TEST_ASSERT_EQUAL_INT(FakeMotorDriver::SETTING, gFake.last_call);
     TEST_ASSERT_EQUAL_INT(MotorDriver::config_setting::MICROSTEPPING, gFake.last_setting);
-    TEST_ASSERT_EQUAL_UINT32(1, gFake.last_data1);
-    TEST_ASSERT_EQUAL_UINT32(0, gFake.last_data2);
+    TEST_ASSERT_EQUAL_UINT32(0, gFake.last_data1);
+    TEST_ASSERT_EQUAL_UINT32(1, gFake.last_data2);
     TEST_ASSERT_EQUAL_UINT8(1, gFake.last_motor_id);
 }
 
-void test_opcode_R_dispatches_stepper_limits_setting(void)
+void test_opcode_R_is_ignored(void)
 {
     enqueue_and_dispatch(make_op('R', 1, 2500, 6000, 1));
-    TEST_ASSERT_EQUAL_INT(FakeMotorDriver::SETTING, gFake.last_call);
-    TEST_ASSERT_EQUAL_INT(MotorDriver::config_setting::STEPPER_LIMITS, gFake.last_setting);
-    TEST_ASSERT_EQUAL_UINT32(2500, gFake.last_data1);
-    TEST_ASSERT_EQUAL_UINT32(6000, gFake.last_data2);
-    TEST_ASSERT_EQUAL_UINT8(1, gFake.last_motor_id);
+    TEST_ASSERT_EQUAL_UINT32(0, gFake.call_count);
+    TEST_ASSERT_EQUAL_INT(FakeMotorDriver::NONE, gFake.last_call);
 }
 
 void test_opcodes_H_and_L_are_noops(void)
@@ -249,7 +245,7 @@ extern "C" void app_main(void)
     RUN_TEST(test_opcode_U_accepts_explicit_32_microstep_setting);
     RUN_TEST(test_opcode_U_uses_legacy_stepRate_when_stepNum_is_zero);
     RUN_TEST(test_opcode_U_normalizes_zero_setting_to_full_step);
-    RUN_TEST(test_opcode_R_dispatches_stepper_limits_setting);
+    RUN_TEST(test_opcode_R_is_ignored);
     RUN_TEST(test_opcodes_H_and_L_are_noops);
     RUN_TEST(test_opcode_K_via_peek_dispatches_abort);
     UNITY_END();

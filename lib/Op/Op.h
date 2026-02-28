@@ -11,10 +11,11 @@ typedef struct Op {
     uint16_t stepRate;
     uint8_t motorID;
     uint32_t sourceIPAddr;
+    uint32_t opSeq;
 
     Op()
     {
-
+        opSeq = 0;
     }
 
     Op(uint8_t* data)
@@ -25,6 +26,8 @@ typedef struct Op {
         stepNum = (((data[4] << 8) | data[5]) << 16) | ((data[6] << 8) | data[7]);
         stepRate = (data[8] << 8) | data[9];
         motorID = data[10]; 
+        sourceIPAddr = 0;
+        opSeq = 0;
     }
 
     Op(uint8_t* data, uint32_t ip)
@@ -36,6 +39,7 @@ typedef struct Op {
         stepRate = (data[8] << 8) | data[9];
         motorID = data[10]; 
         sourceIPAddr = ip;
+        opSeq = 0;
     }
 } Op;
 

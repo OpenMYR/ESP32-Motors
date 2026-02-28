@@ -173,6 +173,11 @@ bool PulseEngineRmtModel::buildNextFrame(PulseEngineRmtFrame *frame)
 
     while (stats_.pulsesPlanned < config_.pulseCount)
     {
+        if (config_.frameMaxPulses > 0 && frame->pulseCount >= config_.frameMaxPulses)
+        {
+            break;
+        }
+
         uint32_t periodTicks = 0;
         PulseEngineTrapezoid::Phase phase = PulseEngineTrapezoid::Phase::CRUISE;
         PulseEngineTrapezoid::State probeState = trapezoidState_;

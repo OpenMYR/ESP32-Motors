@@ -70,6 +70,7 @@ public:
 
     /** @brief Cancel the current motor command immediately. */
     void abortCommand(uint8_t motorID);
+    void setOpcodeContext(uint32_t op_seq, uint8_t motor_id) override;
 
     /** @brief Return the singleton instance. */
     static StepperDriver *IRAM_ATTR getInstance();
@@ -79,16 +80,29 @@ public:
      */
     void changeMotorSettings(MotorDriver::config_setting setting, uint32_t data1, uint32_t data2, uint8_t motorID);
 
-    /** @brief Query whether any endstop input is active. */
+    /** @brief Query whether motor-specific endstop input is active. */
+    bool IRAM_ATTR isEndstopTripped(uint8_t motor_id) override;
+
+    /** @brief Query whether stepper endstop input for motor 1 is active (legacy API). */
     static bool IRAM_ATTR  isEndstopTripped();
 
     /**
-     * @brief Configure the endstop polarity.
+     * @brief Configure the endstop polarity for a specific motor.
+     * @param setting Target setting value.
+     * @param motor_id One-based motor identifier.
+     */
+    esp_err_t setEndstopTrippedPinSetting(uint8_t setting, uint8_t motor_id) override;
+
+    /**
+     * @brief Configure the endstop polarity for motor 1 (legacy API).
      * @param setting Target setting value.
      */
     static esp_err_t setEndstopTrippedPinSetting(uint8_t setting);
 
-    /** @brief Return the configured endstop polarity. */
+    /** @brief Return configured endstop polarity for a specific motor. */
+    bool getEndstopTrippedPinSetting(uint8_t motor_id) override;
+
+    /** @brief Return configured endstop polarity for motor 1 (legacy API). */
     static bool getEndstopTrippedPinSetting();
 
 
@@ -98,14 +112,15 @@ private:
     static void IRAM_ATTR isrIoStep(void *);
     void driver();
 
-    static void IRAM_ATTR onPulseRunComplete(uint32_t pulsesCompleted, void *userCtx);
+    static void IRAM_ATTR onPulseRunComplete(uint32_t pulsesCompleted, uint32_t runToken, void *userCtx);
     void applyPulseProgress(uint32_t pulsesCompleted);
+    void stopActiveCommandForEndstop();
+    bool tryStartPendingPulse(uint8_t motorIndex);
+    uint32_t consumeOpcodeContextSeq(uint8_t motorIndex);
 
     static StepperDriver *instance;
     CommandLayer *commandInstance;
     TaskHandle_t motorTaskHandle;
-    static void IRAM_ATTR endstop_a_interrupt(void *);
-    static void IRAM_ATTR endstop_b_interrupt(void *);
     static void setSleep(bool sleep);
     static void addSteps(uint32_t steps);
     static void addSteps(uint32_t steps, uint16_t microstepRate);
@@ -132,6 +147,15 @@ private:
     double commandDeltaAngle[MAX_STEPPER_MOTORS] = {180};
     uint64_t startTime[MAX_STEPPER_MOTORS] = {90};
     uint64_t commandDeltaTime[MAX_STEPPER_MOTORS] = {0};
+    bool pulseStartPending[MAX_STEPPER_MOTORS] = {0};
+    uint32_t pendingPulseSteps[MAX_STEPPER_MOTORS] = {0};
+    uint16_t pendingPulseRateHz[MAX_STEPPER_MOTORS] = {0};
+    uint64_t pendingPulseDurationUs[MAX_STEPPER_MOTORS] = {0};
+    uint32_t opcodeContextSeq[MAX_STEPPER_MOTORS] = {0};
+    uint32_t pendingPulseToken[MAX_STEPPER_MOTORS] = {0};
+    uint32_t activePulseToken[MAX_STEPPER_MOTORS] = {0};
+    uint32_t activeOpcodeSeq[MAX_STEPPER_MOTORS] = {0};
+    uint32_t abortWatermarkSeq[MAX_STEPPER_MOTORS] = {0};
     uint64_t degreesToSteps(double);
 
     bool isValidOpCode(Op *);

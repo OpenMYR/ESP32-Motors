@@ -23,9 +23,10 @@ public:
         uint32_t pulseCount = 0;
         uint32_t startSpeedHz = 0;
         uint32_t endSpeedHz = 0;
+        uint32_t runToken = 0;
     };
 
-    using CompletionCallback = void (*)(uint32_t pulsesCompleted, void *userCtx);
+    using CompletionCallback = void (*)(uint32_t pulsesCompleted, uint32_t runToken, void *userCtx);
 
     static esp_err_t init(gpio_num_t stepPin);
     static void registerCompletionCallback(CompletionCallback callback, void *userCtx);

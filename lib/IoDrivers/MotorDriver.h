@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <esp_err.h>
 
 /**
  * @brief Base interface for motor driver implementations.
@@ -86,10 +87,44 @@ class MotorDriver
         virtual void motorSleep(signed int wait_time, unsigned short precision, uint8_t motor_id) {}
 
         /**
+         * @brief Set per-dispatch opcode context for the next driver call.
+         * @param op_seq Monotonic opcode sequence number.
+         * @param motor_id One-based motor identifier.
+         */
+        virtual void setOpcodeContext(uint32_t op_seq, uint8_t motor_id) { (void)op_seq; (void)motor_id; }
+
+        /**
          * @brief Cancel the current motor command immediately.
          * @param motorID One-based motor identifier.
          */
         virtual void abortCommand(uint8_t motorID) {}
+
+        /**
+         * @brief Query endstop state for a motor.
+         * @param motor_id One-based motor identifier.
+         * @return True when the selected motor has a tripped endstop.
+         */
+        virtual bool isEndstopTripped(uint8_t motor_id) { (void)motor_id; return false; }
+
+        /**
+         * @brief Configure endstop active polarity for a motor.
+         * @param setting 0 for active-low, 1 for active-high.
+         * @param motor_id One-based motor identifier.
+         * @return ESP_OK when applied, ESP_ERR_NOT_SUPPORTED when unavailable.
+         */
+        virtual esp_err_t setEndstopTrippedPinSetting(uint8_t setting, uint8_t motor_id)
+        {
+            (void)setting;
+            (void)motor_id;
+            return ESP_ERR_NOT_SUPPORTED;
+        }
+
+        /**
+         * @brief Return configured endstop active polarity for a motor.
+         * @param motor_id One-based motor identifier.
+         * @return True when active-high is configured.
+         */
+        virtual bool getEndstopTrippedPinSetting(uint8_t motor_id) { (void)motor_id; return false; }
 
     protected:
         /**

@@ -152,6 +152,24 @@ void test_endstop_policy_allows_commands_when_not_tripped(void)
     TEST_ASSERT_FALSE(StepperDriver::shouldRejectForEndstop('I', false));
 }
 
+void test_endstop_mapping_only_motor_one_exposes_stepper_endstops(void)
+{
+    TEST_ASSERT_FALSE(StepperDriver::getInstance()->isEndstopTripped(2));
+    TEST_ASSERT_FALSE(StepperDriver::getInstance()->getEndstopTrippedPinSetting(2));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, StepperDriver::getInstance()->setEndstopTrippedPinSetting(true, 2));
+}
+
+void test_endstop_legacy_and_motor_one_setting_paths_match(void)
+{
+    TEST_ASSERT_EQUAL(ESP_OK, StepperDriver::getInstance()->setEndstopTrippedPinSetting(false, 1));
+    TEST_ASSERT_FALSE(StepperDriver::getInstance()->getEndstopTrippedPinSetting(1));
+    TEST_ASSERT_FALSE(StepperDriver::getInstance()->getEndstopTrippedPinSetting());
+
+    TEST_ASSERT_EQUAL(ESP_OK, StepperDriver::getInstance()->setEndstopTrippedPinSetting(true));
+    TEST_ASSERT_TRUE(StepperDriver::getInstance()->getEndstopTrippedPinSetting(1));
+    TEST_ASSERT_TRUE(StepperDriver::getInstance()->getEndstopTrippedPinSetting());
+}
+
 extern "C" void app_main(void)
 {
     wait_for_monitor_attach();
@@ -170,5 +188,7 @@ extern "C" void app_main(void)
     RUN_TEST(test_endstop_policy_blocks_motion_commands_when_tripped);
     RUN_TEST(test_endstop_policy_allows_dwell_commands_when_tripped);
     RUN_TEST(test_endstop_policy_allows_commands_when_not_tripped);
+    RUN_TEST(test_endstop_mapping_only_motor_one_exposes_stepper_endstops);
+    RUN_TEST(test_endstop_legacy_and_motor_one_setting_paths_match);
     UNITY_END();
 }

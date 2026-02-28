@@ -13,6 +13,7 @@
 #include <esp_timer.h>
 
 #include "PulseEngine.h"
+#include "EndStop.h"
 #include "StepperDriver.h"
 #include "OpBuffer.h"
 
@@ -42,7 +43,66 @@ uint64_t timeout_grace_us(uint64_t scheduledWindowUs)
     const uint64_t proportionalGrace = scheduledWindowUs / kCommandTimeoutGraceDivisor;
     return proportionalGrace > kCommandTimeoutMinGraceUs ? proportionalGrace : kCommandTimeoutMinGraceUs;
 }
+
+bool sequence_is_after(uint32_t seq, uint32_t watermark)
+{
+    return static_cast<int32_t>(seq - watermark) > 0;
+}
+
+bool sequence_is_stale(uint32_t seq, uint32_t watermark)
+{
+    if (seq == 0) return false;
+    return !sequence_is_after(seq, watermark);
+}
 } // namespace
+
+bool StepperDriver::tryStartPendingPulse(uint8_t motorIndex)
+{
+    if (motorIndex >= static_cast<uint8_t>(motorsControlled)) return false;
+    if (!pulseStartPending[motorIndex]) return true;
+    if (pendingPulseSteps[motorIndex] == 0 || pendingPulseRateHz[motorIndex] == 0)
+    {
+        pulseStartPending[motorIndex] = false;
+        commandDone[motorIndex] = true;
+        return false;
+    }
+
+    PulseEngine::StartConfig pulseConfig = {};
+    pulseConfig.pulseCount = pendingPulseSteps[motorIndex];
+    pulseConfig.startSpeedHz = pendingPulseRateHz[motorIndex];
+    pulseConfig.endSpeedHz = pendingPulseRateHz[motorIndex];
+    pulseConfig.runToken = pendingPulseToken[motorIndex];
+
+    const esp_err_t pulseErr = PulseEngine::startPulses(pulseConfig);
+    if (pulseErr == ESP_OK)
+    {
+        startTime[motorIndex] = esp_timer_get_time();
+        commandDeltaTime[motorIndex] = pendingPulseDurationUs[motorIndex] == UINT64_MAX
+                                           ? UINT64_MAX
+                                           : (startTime[motorIndex] + pendingPulseDurationUs[motorIndex] + kCommandTimingMarginUs);
+        activePulseToken[motorIndex] = pendingPulseToken[motorIndex];
+        pulseStartPending[motorIndex] = false;
+        return true;
+    }
+
+    if (pulseErr == ESP_ERR_INVALID_STATE)
+    {
+        commandDeltaTime[motorIndex] = UINT64_MAX;
+        return false;
+    }
+
+    commandDone[motorIndex] = true;
+    pulseStartPending[motorIndex] = false;
+    pendingPulseToken[motorIndex] = 0;
+    ESP_LOGW(
+        TAG,
+        "Pulse start failed terminally: motor=%u steps=%u rate=%u err=%s",
+        static_cast<unsigned>(motorIndex + 1),
+        static_cast<unsigned>(pulseConfig.pulseCount),
+        static_cast<unsigned>(pulseConfig.startSpeedHz),
+        esp_err_to_name(pulseErr));
+    return false;
+}
 
 StepperDriver *StepperDriver::instance = nullptr;
 static uint8_t peekTicks = 5;
@@ -56,30 +116,9 @@ static uint8_t peekRate = 5;
 #define GPIO_USTEP_MS3 2
 #define MAXMICROSTEPS 32
 
-//end stop
-#define GPIO_IO_A 21
-#define GPIO_IO_B 22
-#define MYR_DEFAULT_DEBOUNCE_MS 10 // TODO: NVS config
-
 bool const positiveDirection = true;
 uint32_t direction = 0;
 uint32_t DRAM_ATTR paused = 0;
-
-
-bool DRAM_ATTR                  isEndstopTrippedHigh        = false; // Value of endstop when it is engaged.
-uint32_t DRAM_ATTR static       debounceTimeMs              = MYR_DEFAULT_DEBOUNCE_MS;    // millis // TODO: NVS config
-
-static DRAM_ATTR portMUX_TYPE   endstopAMux                 = portMUX_INITIALIZER_UNLOCKED;
-bool DRAM_ATTR static           isEndstopA_ActiveNow        = false;
-uint32_t DRAM_ATTR volatile     numberOfEndstopAIsr         = 0;
-bool DRAM_ATTR                  lastStateEndstopAIsr        = 0;
-uint32_t DRAM_ATTR volatile     debounceTimeoutEndstopAIsr  = 0;
-
-static DRAM_ATTR portMUX_TYPE   endstopBMux                 = portMUX_INITIALIZER_UNLOCKED;
-bool DRAM_ATTR static           isEndstopB_ActiveNow        = false;
-uint32_t DRAM_ATTR volatile     numberOfEndstopBIsr         = 0;
-bool DRAM_ATTR volatile         lastStateEndstopBIsr        = 0;
-uint32_t DRAM_ATTR volatile     debounceTimeoutEndstopBIsr  = 0;
 
 uint16_t stepsPerRev = 200;
 uint16_t mircoSteps = 1;
@@ -157,32 +196,7 @@ bool StepperDriver::shouldRejectForEndstop(char opcode, bool endstopTripped)
 void StepperDriver::initMotorGpio()
 {
     motorsControlled = 1;
-    gpio_config_t ioAConfig = {};
-    ioAConfig.pin_bit_mask = (1ULL << GPIO_IO_A);
-    ioAConfig.mode = GPIO_MODE_INPUT;
-    ioAConfig.pull_up_en = GPIO_PULLUP_ENABLE;
-    ioAConfig.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    ioAConfig.intr_type = GPIO_INTR_ANYEDGE;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(gpio_config(&ioAConfig));
-
-    gpio_config_t ioBConfig = {};
-    ioBConfig.pin_bit_mask = (1ULL << GPIO_IO_B);
-    ioBConfig.mode = GPIO_MODE_INPUT;
-    ioBConfig.pull_up_en = GPIO_PULLUP_ENABLE;
-    ioBConfig.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    ioBConfig.intr_type = GPIO_INTR_ANYEDGE;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(gpio_config(&ioBConfig));
-
-    if (!gGpioIsrServiceInstalled) {
-        esp_err_t err = gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
-        if (err == ESP_OK || err == ESP_ERR_INVALID_STATE) {
-            gGpioIsrServiceInstalled = true;
-        } else {
-            ESP_ERROR_CHECK_WITHOUT_ABORT(err);
-        }
-    }
-    ESP_ERROR_CHECK_WITHOUT_ABORT(gpio_isr_handler_add(static_cast<gpio_num_t>(GPIO_IO_A), &endstop_a_interrupt, nullptr));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(gpio_isr_handler_add(static_cast<gpio_num_t>(GPIO_IO_B), &endstop_b_interrupt, nullptr));
+    Endstop::configureGpioAndAttachIsr(gGpioIsrServiceInstalled);
 
     gpio_config_t outputConfig = {};
     outputConfig.pin_bit_mask =
@@ -214,8 +228,7 @@ void StepperDriver::initMotorGpio()
             PulseEngine::registerCompletionCallback(&StepperDriver::onPulseRunComplete, this);
     }
 
-    endstop_a_interrupt(nullptr);
-    endstop_b_interrupt(nullptr);
+    Endstop::primeStateFromPins();
 }
 
 /**
@@ -228,8 +241,16 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
 {
     uint8_t motorIndex = 0;
     if (!tryResolveMotorIndex(motorID, motorsControlled, motorIndex)) return;
+    const uint32_t opcodeSeq = consumeOpcodeContextSeq(motorIndex);
+    if (sequence_is_stale(opcodeSeq, abortWatermarkSeq[motorIndex]))
+    {
+        commandDone[motorIndex] = true;
+        pulseStartPending[motorIndex] = false;
+        return;
+    }
+    activeOpcodeSeq[motorIndex] = opcodeSeq;
 
-    if (shouldRejectForEndstop('G', isEndstopTripped()))
+    if (shouldRejectForEndstop('G', isEndstopTripped(motorID)))
     {
         return;
     }
@@ -258,29 +279,14 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
     {
         startAngle[motorIndex] = currentStep;
         commandDeltaAngle[motorIndex] = plan.goalStep;
-        startTime[motorIndex] = esp_timer_get_time();
-        commandDeltaTime[motorIndex] =
-            plan.durationUs == UINT64_MAX ? UINT64_MAX : startTime[motorIndex] + plan.durationUs + kCommandTimingMarginUs;
         commandDone[motorIndex] = false;
-
-        PulseEngine::StartConfig pulseConfig = {};
-        pulseConfig.pulseCount = plan.steps;
-        pulseConfig.startSpeedHz = rate;
-        pulseConfig.endSpeedHz = rate;
-        esp_err_t pulseErr = PulseEngine::startPulses(pulseConfig);
-        if (pulseErr != ESP_OK)
-        {
-            commandDone[motorIndex] = true;
-            ESP_LOGW(
-                TAG,
-                "Pulse start failed: motor=%u steps=%u start=%u end=%u err=%s",
-                static_cast<unsigned>(motorIndex + 1),
-                static_cast<unsigned>(pulseConfig.pulseCount),
-                static_cast<unsigned>(pulseConfig.startSpeedHz),
-                static_cast<unsigned>(pulseConfig.endSpeedHz),
-                esp_err_to_name(pulseErr));
-            return;
-        }
+        pendingPulseSteps[motorIndex] = plan.steps;
+        pendingPulseRateHz[motorIndex] = rate;
+        pendingPulseDurationUs[motorIndex] = plan.durationUs;
+        pendingPulseToken[motorIndex] = opcodeSeq;
+        pulseStartPending[motorIndex] = true;
+        commandDeltaTime[motorIndex] = UINT64_MAX;
+        (void)tryStartPendingPulse(motorIndex);
         if (plan.durationUs == UINT64_MAX)
         {
             ESP_LOGI(
@@ -322,7 +328,7 @@ void StepperDriver::motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID
     uint8_t motorIndex = 0;
     if (!tryResolveMotorIndex(motorID, motorsControlled, motorIndex)) return;
 
-    if (shouldRejectForEndstop('M', isEndstopTripped())) return;
+    if (shouldRejectForEndstop('M', isEndstopTripped(motorID))) return;
 
     const int32_t currentStep = static_cast<int32_t>(currentAngle[motorIndex]);
     const int32_t goalStep = currentStep + deltaAngle;
@@ -343,8 +349,16 @@ void StepperDriver::motorStop(signed int wait_time, unsigned short precision, ui
     // precision, wait cycles per second
     uint8_t motorIndex = 0;
     if (!tryResolveMotorIndex(motorID, motorsControlled, motorIndex)) return;
+    const uint32_t opcodeSeq = consumeOpcodeContextSeq(motorIndex);
+    if (sequence_is_stale(opcodeSeq, abortWatermarkSeq[motorIndex]))
+    {
+        commandDone[motorIndex] = true;
+        pulseStartPending[motorIndex] = false;
+        return;
+    }
+    activeOpcodeSeq[motorIndex] = opcodeSeq;
 
-    if (shouldRejectForEndstop('S', isEndstopTripped()))
+    if (shouldRejectForEndstop('S', isEndstopTripped(motorID)))
     {
         return;
     }
@@ -354,6 +368,9 @@ void StepperDriver::motorStop(signed int wait_time, unsigned short precision, ui
     const uint64_t dwellDurationUs = planDwellDurationUs(wait_time, precision);
     commandDeltaTime[motorIndex] = startTime[motorIndex] + dwellDurationUs;
     commandDone[motorIndex] = false;
+    pulseStartPending[motorIndex] = false;
+    pendingPulseToken[motorIndex] = 0;
+    activePulseToken[motorIndex] = 0;
     
     if(motorSleeping){
         motorSleeping = false;
@@ -376,8 +393,16 @@ void StepperDriver::motorSleep(signed int wait_time, unsigned short precision, u
     // precision, wait cycles per second
     uint8_t motorIndex = 0;
     if (!tryResolveMotorIndex(motorID, motorsControlled, motorIndex)) return;
+    const uint32_t opcodeSeq = consumeOpcodeContextSeq(motorIndex);
+    if (sequence_is_stale(opcodeSeq, abortWatermarkSeq[motorIndex]))
+    {
+        commandDone[motorIndex] = true;
+        pulseStartPending[motorIndex] = false;
+        return;
+    }
+    activeOpcodeSeq[motorIndex] = opcodeSeq;
 
-    if (shouldRejectForEndstop('I', isEndstopTripped()))
+    if (shouldRejectForEndstop('I', isEndstopTripped(motorID)))
     {
         return;
     }
@@ -387,6 +412,9 @@ void StepperDriver::motorSleep(signed int wait_time, unsigned short precision, u
     const uint64_t dwellDurationUs = planDwellDurationUs(wait_time, precision);
     commandDeltaTime[motorIndex] = startTime[motorIndex] + dwellDurationUs;
     commandDone[motorIndex] = false;
+    pulseStartPending[motorIndex] = false;
+    pendingPulseToken[motorIndex] = 0;
+    activePulseToken[motorIndex] = 0;
 
     motorSleeping = true;
     setSleep(motorSleeping);
@@ -401,9 +429,23 @@ void StepperDriver::abortCommand(uint8_t motorID)
 {
     uint8_t motorIndex = 0;
     if (!tryResolveMotorIndex(motorID, motorsControlled, motorIndex)) return;
+    const uint32_t abortSeq = consumeOpcodeContextSeq(motorIndex);
+    if (sequence_is_after(abortSeq, abortWatermarkSeq[motorIndex])) abortWatermarkSeq[motorIndex] = abortSeq;
+    if (abortSeq == 0 && sequence_is_after(activeOpcodeSeq[motorIndex], abortWatermarkSeq[motorIndex]))
+        abortWatermarkSeq[motorIndex] = activeOpcodeSeq[motorIndex];
 
     applyPulseProgress(PulseEngine::stop());
+    pulseStartPending[motorIndex] = false;
+    pendingPulseToken[motorIndex] = 0;
+    activePulseToken[motorIndex] = 0;
     commandDone[motorIndex] = true;
+}
+
+void StepperDriver::setOpcodeContext(uint32_t op_seq, uint8_t motor_id)
+{
+    uint8_t motorIndex = 0;
+    if (!tryResolveMotorIndex(motor_id, motorsControlled, motorIndex)) return;
+    opcodeContextSeq[motorIndex] = op_seq;
 }
 
 /**
@@ -424,106 +466,18 @@ void StepperDriver::isrStartIoDriver()
         kMotorTaskCore);
 }
 
-/**
- * @brief ISR that records the latest state and debounce timestamp for endstop A.
- */
-void IRAM_ATTR StepperDriver::endstop_a_interrupt(void *arg)
+bool StepperDriver::isEndstopTripped(uint8_t motor_id)
 {
-    (void)arg;
-    //endstopMux
-    portENTER_CRITICAL_ISR(&endstopAMux);
-    numberOfEndstopAIsr = numberOfEndstopAIsr + 1;
-    lastStateEndstopAIsr = gpio_get_level(static_cast<gpio_num_t>(GPIO_IO_A));
-    debounceTimeoutEndstopAIsr = xTaskGetTickCountFromISR();
-    portEXIT_CRITICAL_ISR(&endstopAMux);
+    if (motor_id != 1)
+    {
+        return false;
+    }
+    return Endstop::isTripped();
 }
 
-/**
- * @brief ISR that records the latest state and debounce timestamp for endstop B.
- */
-void IRAM_ATTR StepperDriver::endstop_b_interrupt(void *arg)
-{
-    (void)arg;
-    portENTER_CRITICAL_ISR(&endstopBMux);
-    numberOfEndstopBIsr = numberOfEndstopBIsr + 1;
-    lastStateEndstopBIsr = gpio_get_level(static_cast<gpio_num_t>(GPIO_IO_B));
-    debounceTimeoutEndstopBIsr = xTaskGetTickCountFromISR();
-    portEXIT_CRITICAL_ISR(&endstopBMux);
-}
-
-/**
- * @brief Debounce both endstops and return true if either is currently tripped.
- * @return True when a stable endstop engagement has been detected.
- */
 bool IRAM_ATTR StepperDriver::isEndstopTripped()
 {
-    uint32_t saveDebounceTimeout;
-    bool saveLastState;
-    uint32_t hasChanged;
-    bool currentState = false;
-    bool retunValue = false;
-
-    //endstopA
-    portENTER_CRITICAL_ISR(&endstopAMux);
-    hasChanged  = numberOfEndstopAIsr;
-    saveDebounceTimeout = debounceTimeoutEndstopAIsr;
-    saveLastState  = lastStateEndstopAIsr;
-    portEXIT_CRITICAL_ISR(&endstopAMux);
-    
-    currentState = gpio_get_level(static_cast<gpio_num_t>(GPIO_IO_A));
-
-    // if Interrupt Has triggered AND pin is in same state AND the debounce time has expired THEN endstop is stable
-    if ((hasChanged != 0) &&
-        (currentState == saveLastState) &&
-        ((xTaskGetTickCount() - saveDebounceTimeout) > pdMS_TO_TICKS(debounceTimeMs)))
-    { 
-        portENTER_CRITICAL_ISR(&endstopAMux);
-        numberOfEndstopAIsr = 0; // clear counter
-        portEXIT_CRITICAL_ISR(&endstopAMux);
-        
-        if (currentState == isEndstopTrippedHigh)
-        {
-            isEndstopA_ActiveNow = true;
-        }
-        else
-        {
-            isEndstopA_ActiveNow = false;
-        }
-    }
-
-    retunValue |= isEndstopA_ActiveNow;
-
-    //endstopB
-    portENTER_CRITICAL_ISR(&endstopBMux);
-    hasChanged  = numberOfEndstopBIsr;
-    saveDebounceTimeout = debounceTimeoutEndstopBIsr;
-    saveLastState  = lastStateEndstopBIsr;
-    portEXIT_CRITICAL_ISR(&endstopBMux);
-    
-    currentState = gpio_get_level(static_cast<gpio_num_t>(GPIO_IO_B));
-
-    // if Interrupt Has triggered AND pin is in same state AND the debounce time has expired THEN endstop is stable
-    if ((hasChanged != 0) &&
-        (currentState == saveLastState) &&
-        ((xTaskGetTickCount() - saveDebounceTimeout) > pdMS_TO_TICKS(debounceTimeMs)))
-    { 
-        portENTER_CRITICAL_ISR(&endstopBMux);
-        numberOfEndstopBIsr = 0; // clear counter
-        portEXIT_CRITICAL_ISR(&endstopBMux);
-      
-        if (currentState == isEndstopTrippedHigh)
-        {
-            isEndstopB_ActiveNow = true;
-        }
-        else
-        {
-            isEndstopB_ActiveNow = false;
-        }
-    }
-
-    retunValue |= isEndstopB_ActiveNow;
-    
-    return retunValue;
+    return StepperDriver::getInstance()->isEndstopTripped(1);
 }
 
 
@@ -553,13 +507,39 @@ void StepperDriver::isrIoStep(void *pvParameters)
     driver->driver();
 }
 
-void IRAM_ATTR StepperDriver::onPulseRunComplete(uint32_t pulsesCompleted, void *userCtx)
+void IRAM_ATTR StepperDriver::onPulseRunComplete(uint32_t pulsesCompleted, uint32_t runToken, void *userCtx)
 {
     StepperDriver *driver = static_cast<StepperDriver *>(userCtx);
     if (driver == nullptr) return;
+    if (runToken != driver->activePulseToken[0]) return;
 
     driver->applyPulseProgress(pulsesCompleted);
+    driver->activePulseToken[0] = 0;
+    driver->pulseStartPending[0] = false;
     driver->commandDone[0] = true;
+}
+
+void StepperDriver::stopActiveCommandForEndstop()
+{
+    if (motorDwell) return;
+
+    bool stoppedAny = false;
+    for (int i = 0; i < motorsControlled; ++i)
+    {
+        if (commandDone[i]) continue;
+
+        applyPulseProgress(PulseEngine::stop());
+        pulseStartPending[i] = false;
+        pendingPulseToken[i] = 0;
+        activePulseToken[i] = 0;
+        commandDone[i] = true;
+        stoppedAny = true;
+    }
+
+    if (!stoppedAny) return;
+    motorSleeping = true;
+    gpio_set_level(static_cast<gpio_num_t>(GPIO_STEP_ENABLE), 1);
+    ESP_LOGW(TAG, "Command: Stopped by endstop");
 }
 
 void StepperDriver::applyPulseProgress(uint32_t pulsesCompleted)
@@ -589,7 +569,6 @@ void IRAM_ATTR StepperDriver::driver()
 {
     while (true)
     {
-
         if (peekTicks == 0)
         {
             peekTicks = peekRate;
@@ -600,14 +579,25 @@ void IRAM_ATTR StepperDriver::driver()
         {
             if (!commandDone[i])
             {
+                if (pulseStartPending[i])
+                {
+                    (void)tryStartPendingPulse(static_cast<uint8_t>(i));
+                    if (pulseStartPending[i])
+                    {
+                        if (peekTicks == 0)
+                        {
+                            peekOpForDriver(i);
+                        }
+                        continue;
+                    }
+                }
+
                 PulseEngine::service();
                 if (commandDone[i]) continue;
 
-                if (!motorDwell && isEndstopTripped())
+                if (!motorDwell && isEndstopTripped(static_cast<uint8_t>(i + 1)))
                 {
-                    applyPulseProgress(PulseEngine::stop());
-                    commandDone[i] = true;
-                    ESP_LOGW(TAG, "Command: Stopped by endstop");
+                    stopActiveCommandForEndstop();
                     continue;
                 }
 
@@ -632,6 +622,7 @@ void IRAM_ATTR StepperDriver::driver()
 
                         const uint32_t pulsesCompleted = PulseEngine::stop();
                         applyPulseProgress(pulsesCompleted);
+                        activePulseToken[i] = 0;
                         ESP_LOGE(TAG, "Command: Timed out");
                         ESP_LOGE(
                             TAG,
@@ -668,10 +659,18 @@ void IRAM_ATTR StepperDriver::driver()
                 getNextOpForDriver(i);
             }
         }
+        // Always yield one tick so IDLE1 can service the task watchdog.
         // TODO(STEPPER-DRIVER-EVENT-LOOP): Replace polling + tick delay with event-driven wake (queue/task notification).
         vTaskDelay(1);
     }
     vTaskDelete(nullptr);
+}
+
+uint32_t StepperDriver::consumeOpcodeContextSeq(uint8_t motorIndex)
+{
+    const uint32_t seq = opcodeContextSeq[motorIndex];
+    opcodeContextSeq[motorIndex] = 0;
+    return seq;
 }
 
 /**
@@ -718,9 +717,8 @@ void StepperDriver::changeMotorSettings(config_setting setting, uint32_t data1, 
  */
 void StepperDriver::setSleep(bool sleep)
 {
-    PulseEngine::stop();
-
     if(sleep){
+        PulseEngine::stop();
         gpio_set_level(static_cast<gpio_num_t>(GPIO_STEP_ENABLE), 1);
     }
     else
@@ -736,8 +734,7 @@ void StepperDriver::setSleep(bool sleep)
  */
 bool StepperDriver::getEndstopTrippedPinSetting()
 {
-    return isEndstopTrippedHigh;
-
+    return StepperDriver::getInstance()->getEndstopTrippedPinSetting(1);
 }
 
 /**
@@ -747,16 +744,27 @@ bool StepperDriver::getEndstopTrippedPinSetting()
  */
 esp_err_t StepperDriver::setEndstopTrippedPinSetting(uint8_t setting) 
 {
-    esp_err_t error = ESP_OK;
-    if (setting <= 1)
+    return StepperDriver::getInstance()->setEndstopTrippedPinSetting(setting, 1);
+}
+
+bool StepperDriver::getEndstopTrippedPinSetting(uint8_t motor_id)
+{
+    if (motor_id != 1)
     {
-        isEndstopTrippedHigh = static_cast<bool>(setting);
-        // TODO: Add endstop update logic?
-    } else {
+        return false;
+    }
+
+    return Endstop::getTrippedPinSetting();
+}
+
+esp_err_t StepperDriver::setEndstopTrippedPinSetting(uint8_t setting, uint8_t motor_id)
+{
+    if (motor_id != 1)
+    {
         return ESP_ERR_INVALID_ARG;
     }
-    
-    return error;
+
+    return Endstop::setTrippedPinSetting(setting);
 }
 
 

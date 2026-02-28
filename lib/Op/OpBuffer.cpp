@@ -8,6 +8,7 @@ SemaphoreHandle_t gMutex = nullptr;
 uint16_t gHead[OP_BUFFER_COUNT];
 uint16_t gTail[OP_BUFFER_COUNT];
 uint16_t gLength[OP_BUFFER_COUNT];
+uint32_t gNextSeq[OP_BUFFER_COUNT];
 } // namespace
 
 OpBuffer *OpBuffer::instance = nullptr;
@@ -36,7 +37,9 @@ int8_t OpBuffer::storeOp(Op *op) {
     if (xSemaphoreTake(gMutex, pdMS_TO_TICKS(200)) == pdTRUE) {
         if (validIndex(op->motorID)) {
             if (gLength[op->motorID] < OP_BUFFER_SIZE) {
-                opQueue[op->motorID][(gTail[op->motorID] + 1) % OP_BUFFER_SIZE] = *op;
+                Op sequencedOp = *op;
+                sequencedOp.opSeq = gNextSeq[op->motorID]++;
+                opQueue[op->motorID][(gTail[op->motorID] + 1) % OP_BUFFER_SIZE] = sequencedOp;
                 gTail[op->motorID] = (gTail[op->motorID] + 1) % OP_BUFFER_SIZE;
                 gLength[op->motorID]++;
                 error = 0;
@@ -142,6 +145,7 @@ bool OpBuffer::isFull(uint8_t id) {
 void OpBuffer::reset() {
     for (int i = 0; i < OP_BUFFER_COUNT; i++) {
         clear(i);
+        gNextSeq[i] = 1;
     }
 }
 

@@ -1,58 +1,115 @@
 #include "PulseEngine.h"
 
 #include <driver/gpio.h>
-#include <driver/pulse_cnt.h>
-#include <driver/rmt_common.h>
 #include <driver/rmt_encoder.h>
 #include <driver/rmt_tx.h>
 #include <esp_attr.h>
 #include <esp_log.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include <sdkconfig.h>
 
 namespace {
 const char *TAG = "PulseEngine";
 
 constexpr uint32_t kRmtResolutionHz = 1000000;
 constexpr uint32_t kPulseHighUs = 2;
-constexpr uint16_t kSymbolDurationMax = 32767;
+constexpr uint16_t kRmtDurationMax = 32767;
 constexpr int kRmtIntrPriority = 1;
-constexpr size_t kRmtMemBlockSymbols = 512;
-constexpr size_t kRmtQueueDepth = 1;
+constexpr size_t kRmtMemBlockSymbols = 128;
+constexpr size_t kRmtQueueDepth = 4;
 
-constexpr int kPcntHighLimit = 30000;
-constexpr int kPcntLowLimit = -1;
+#ifndef MYR_RMT_CHUNK_HORIZON_US
+#define MYR_RMT_CHUNK_HORIZON_US 20000
+#endif
+#ifndef MYR_RMT_CHUNK_MAX_STEPS
+#define MYR_RMT_CHUNK_MAX_STEPS 64
+#endif
 
-constexpr uint32_t kWorkerTaskStackWords = 2048;
+constexpr uint32_t kChunkHorizonUsRaw = static_cast<uint32_t>(MYR_RMT_CHUNK_HORIZON_US);
+constexpr uint32_t kChunkHorizonUs =
+    kChunkHorizonUsRaw < 2000U ? 2000U : (kChunkHorizonUsRaw > 20000U ? 20000U : kChunkHorizonUsRaw);
+constexpr uint32_t kChunkHorizonTicks = (kRmtResolutionHz / 1000000U) * kChunkHorizonUs;
+constexpr uint32_t kChunkMaxSteps = static_cast<uint32_t>(MYR_RMT_CHUNK_MAX_STEPS);
+
+constexpr uint32_t kMaxExpectedStepHz = 10000;
+constexpr uint32_t kWorkerTaskStackWords = 3072;
 constexpr UBaseType_t kWorkerTaskPriority = 6;
+#ifndef MYR_RMT_WORKER_CORE
+#define MYR_RMT_WORKER_CORE 1
+#endif
+constexpr BaseType_t kWorkerTaskCore = static_cast<BaseType_t>(MYR_RMT_WORKER_CORE);
+
+constexpr uint32_t kEvtStartRequest = 1U << 0;
+constexpr uint32_t kEvtAbortRequest = 1U << 1;
+constexpr uint32_t kEvtTxDone = 1U << 2;
+constexpr uint32_t kStopSyncTimeoutUs = 120000U;
+
+constexpr size_t kChunkSymbolCapacity = 768;
+constexpr uint8_t kChunkPipelineDepth = 4;
+
+struct ChunkBuffer
+{
+    rmt_symbol_word_t symbols[kChunkSymbolCapacity] = {};
+    uint16_t symbolCount = 0;
+    uint16_t pulseCount = 0;
+    uint64_t horizonTicksUsed = 0;
+};
+
+enum class EngineState : uint8_t
+{
+    UNINIT = 0,
+    IDLE,
+    START_PENDING,
+    RUNNING,
+    ABORTING,
+    ERROR,
+};
+
+struct RunContext
+{
+    PulseEngine::StartConfig move = {};
+    uint32_t targetPulses = 0;
+    uint32_t nextPulseIndex = 0;
+    uint32_t completedPulses = 0;
+    uint32_t activeRunToken = 0;
+    uint32_t activeAbortGen = 0;
+};
+
+struct Metrics
+{
+    uint32_t txChunksSent = 0;
+    uint32_t abortCount = 0;
+    uint32_t restartCount = 0;
+    uint32_t invalidStateErrors = 0;
+    uint64_t lastAbortToIdleUs = 0;
+};
 
 rmt_channel_handle_t gTxChannel = nullptr;
-rmt_encoder_handle_t gEncoder = nullptr;
-pcnt_unit_handle_t gPulseCountUnit = nullptr;
-pcnt_channel_handle_t gPulseCountChannel = nullptr;
+rmt_encoder_handle_t gCopyEncoder = nullptr;
 TaskHandle_t gWorkerTask = nullptr;
 gpio_num_t gStepPin = GPIO_NUM_NC;
+uint16_t gPulseHighTicks = 1;
 
-PulseEngine::StartConfig gMove = {};
-uint32_t gPulsesTotal = 0;
-uint16_t gHighTicks = 1;
-
-struct EncodeProgress
-{
-    uint32_t pulseIndex = 0;
-    uint32_t lowTailTicks = 0;
-};
-EncodeProgress gEncodeProgress = {};
+portMUX_TYPE gStateMux = portMUX_INITIALIZER_UNLOCKED;
+volatile EngineState gState = EngineState::UNINIT;
+uint32_t gAbortGeneration = 1;
+uint32_t gPendingTxDoneCount = 0;
+volatile bool gCompletionPending = false;
+volatile uint32_t gCompletionPulses = 0;
+volatile uint32_t gCompletionRunToken = 0;
 
 PulseEngine::CompletionCallback gCompletionCallback = nullptr;
 void *gCompletionCtx = nullptr;
 
-volatile bool gRunning = false;
-volatile bool gCompletionPending = false;
-volatile uint32_t gCompletionPulses = 0;
-volatile uint32_t gTxDoneIsrCount = 0;
-bool gTxEnabled = false;
+PulseEngine::StartConfig gPendingStart = {};
+RunContext gRun = {};
+Metrics gMetrics = {};
+ChunkBuffer gChunkPipeline[kChunkPipelineDepth] = {};
+uint8_t gChunkHead = 0;
+uint8_t gChunkTail = 0;
+uint8_t gChunkCount = 0;
+uint64_t gAbortRequestedAtUs = 0;
 
 #if CONFIG_RMT_TX_ISR_CACHE_SAFE
 #define MYR_RMT_CALLBACK_ATTR IRAM_ATTR
@@ -60,260 +117,399 @@ bool gTxEnabled = false;
 #define MYR_RMT_CALLBACK_ATTR
 #endif
 
-static inline uint32_t IRAM_ATTR period_ticks_for_step(uint32_t step)
+static inline uint32_t safe_div_u32(uint64_t numer, uint32_t denom)
 {
-    if (gMove.startSpeedHz == gMove.endSpeedHz) return kRmtResolutionHz / gMove.startSpeedHz;
-    if (gPulsesTotal <= 1) return kRmtResolutionHz / gMove.endSpeedHz;
+    if (denom == 0) return 0;
+    return static_cast<uint32_t>(numer / static_cast<uint64_t>(denom));
+}
 
-    const uint32_t span = gPulsesTotal - 1;
-    const uint32_t clampedStep = step > span ? span : step;
-    const int64_t hz = static_cast<int64_t>(gMove.startSpeedHz) +
-                       ((static_cast<int64_t>(gMove.endSpeedHz) - static_cast<int64_t>(gMove.startSpeedHz)) *
-                        static_cast<int64_t>(clampedStep)) /
-                           static_cast<int64_t>(span);
+static inline uint32_t period_ticks_for_step(const RunContext &run, uint32_t stepIndex)
+{
+    uint32_t startHz = run.move.startSpeedHz;
+    uint32_t endHz = run.move.endSpeedHz;
+    if (startHz == 0 && endHz == 0) return 0;
+    if (startHz == 0) startHz = endHz;
+    if (endHz == 0) endHz = startHz;
 
-    uint32_t period = kRmtResolutionHz / static_cast<uint32_t>(hz > 0 ? hz : 1);
+    uint32_t speedHz = startHz;
+    if (startHz != endHz)
+    {
+        if (run.targetPulses <= 1)
+        {
+            speedHz = endHz;
+        }
+        else
+        {
+            const uint32_t span = run.targetPulses - 1;
+            const uint32_t clampedStep = stepIndex > span ? span : stepIndex;
+            if (endHz > startHz)
+            {
+                const uint64_t delta = static_cast<uint64_t>(endHz - startHz) * static_cast<uint64_t>(clampedStep);
+                speedHz = startHz + static_cast<uint32_t>(delta / static_cast<uint64_t>(span));
+            }
+            else
+            {
+                const uint64_t delta = static_cast<uint64_t>(startHz - endHz) * static_cast<uint64_t>(clampedStep);
+                speedHz = startHz - static_cast<uint32_t>(delta / static_cast<uint64_t>(span));
+            }
+        }
+    }
+
+    if (speedHz == 0) speedHz = 1;
+    uint32_t period = safe_div_u32(static_cast<uint64_t>(kRmtResolutionHz) + static_cast<uint64_t>(speedHz / 2U), speedHz);
     if (period == 0) period = 1;
 
-    const uint32_t minPeriod = static_cast<uint32_t>(gHighTicks) + 1U;
+    const uint32_t minPeriod = static_cast<uint32_t>(gPulseHighTicks) + 1U;
     if (period < minPeriod) period = minPeriod;
     return period;
 }
 
-RMT_ENCODER_FUNC_ATTR
-static size_t encode_pulse_train(
-    const void *data,
-    size_t data_size,
-    size_t symbols_written,
-    size_t symbols_free,
-    rmt_symbol_word_t *symbols,
-    bool *done,
-    void *arg)
+static inline uint16_t symbols_needed_for_period(uint32_t periodTicks)
 {
-    (void)data;
-    (void)data_size;
-    (void)arg;
-    if (symbols == nullptr || done == nullptr) return 0;
+    const uint32_t lowTicks = periodTicks > gPulseHighTicks ? (periodTicks - gPulseHighTicks) : 1U;
+    uint32_t remain = lowTicks;
+    uint16_t symbols = 1;
 
-    if (symbols_written == 0)
+    const uint32_t low0 = remain > kRmtDurationMax ? kRmtDurationMax : remain;
+    remain -= low0;
+
+    while (remain > 0)
     {
-        gEncodeProgress.pulseIndex = 0;
-        gEncodeProgress.lowTailTicks = 0;
+        const uint32_t d0 = remain > kRmtDurationMax ? kRmtDurationMax : remain;
+        remain -= d0;
+        const uint32_t d1 = remain > kRmtDurationMax ? kRmtDurationMax : remain;
+        remain -= d1;
+        symbols = symbols + 1;
     }
 
-    size_t encoded = 0;
-    while (encoded < symbols_free)
+    return symbols;
+}
+
+static inline bool append_pulse_symbols(ChunkBuffer &chunk, uint32_t periodTicks)
+{
+    const uint16_t required = symbols_needed_for_period(periodTicks);
+    if ((static_cast<size_t>(chunk.symbolCount) + required) > kChunkSymbolCapacity) return false;
+
+    uint32_t lowTicks = periodTicks > gPulseHighTicks ? (periodTicks - gPulseHighTicks) : 1U;
+    const uint16_t high = gPulseHighTicks > kRmtDurationMax ? kRmtDurationMax : gPulseHighTicks;
+    const uint16_t low0 = lowTicks > kRmtDurationMax ? kRmtDurationMax : static_cast<uint16_t>(lowTicks);
+    lowTicks -= low0;
+
+    chunk.symbols[chunk.symbolCount++] = {
+        .duration0 = high,
+        .level0 = 1,
+        .duration1 = low0,
+        .level1 = 0,
+    };
+
+    while (lowTicks > 0)
     {
-        if (gEncodeProgress.lowTailTicks > 0)
-        {
-            const uint16_t chunk0 = gEncodeProgress.lowTailTicks > kSymbolDurationMax
-                                        ? kSymbolDurationMax
-                                        : static_cast<uint16_t>(gEncodeProgress.lowTailTicks);
-            gEncodeProgress.lowTailTicks -= chunk0;
+        const uint16_t d0 = lowTicks > kRmtDurationMax ? kRmtDurationMax : static_cast<uint16_t>(lowTicks);
+        lowTicks -= d0;
+        const uint16_t d1 = lowTicks > kRmtDurationMax ? kRmtDurationMax : static_cast<uint16_t>(lowTicks);
+        lowTicks -= d1;
 
-            const uint16_t chunk1 = gEncodeProgress.lowTailTicks > kSymbolDurationMax
-                                        ? kSymbolDurationMax
-                                        : static_cast<uint16_t>(gEncodeProgress.lowTailTicks);
-            gEncodeProgress.lowTailTicks -= chunk1;
-
-            symbols[encoded] = {
-                .duration0 = chunk0,
-                .level0 = 0,
-                .duration1 = chunk1,
-                .level1 = 0,
-            };
-            encoded = encoded + 1;
-            continue;
-        }
-
-        if (gEncodeProgress.pulseIndex >= gPulsesTotal)
-        {
-            *done = true;
-            break;
-        }
-
-        const uint32_t periodTicks = period_ticks_for_step(gEncodeProgress.pulseIndex);
-        const uint32_t lowTicksTotal = periodTicks > gHighTicks ? (periodTicks - gHighTicks) : 1U;
-        const uint16_t lowChunk = lowTicksTotal > kSymbolDurationMax ? kSymbolDurationMax : static_cast<uint16_t>(lowTicksTotal);
-
-        symbols[encoded] = {
-            .duration0 = gHighTicks,
-            .level0 = 1,
-            .duration1 = lowChunk,
+        chunk.symbols[chunk.symbolCount++] = {
+            .duration0 = d0,
+            .level0 = 0,
+            .duration1 = d1,
             .level1 = 0,
         };
-
-        encoded = encoded + 1;
-        gEncodeProgress.pulseIndex = gEncodeProgress.pulseIndex + 1;
-        gEncodeProgress.lowTailTicks = lowTicksTotal - lowChunk;
     }
 
-    if (gEncodeProgress.pulseIndex >= gPulsesTotal && gEncodeProgress.lowTailTicks == 0)
+    chunk.pulseCount = static_cast<uint16_t>(chunk.pulseCount + 1U);
+    chunk.horizonTicksUsed = chunk.horizonTicksUsed + static_cast<uint64_t>(periodTicks);
+    return true;
+}
+
+static bool build_next_chunk(const RunContext &run, ChunkBuffer &chunk)
+{
+    chunk = {};
+    if (run.nextPulseIndex >= run.targetPulses) return false;
+
+    uint32_t remaining = run.targetPulses - run.nextPulseIndex;
+    uint32_t maxChunkSteps = remaining;
+    if (kChunkMaxSteps > 0 && maxChunkSteps > kChunkMaxSteps) maxChunkSteps = kChunkMaxSteps;
+    if (remaining < maxChunkSteps) maxChunkSteps = remaining;
+    if (maxChunkSteps == 0) maxChunkSteps = 1;
+    const bool enforceHorizon = run.move.startSpeedHz != run.move.endSpeedHz;
+
+    for (uint32_t i = 0; i < maxChunkSteps; ++i)
     {
-        *done = true;
+        const uint32_t pulseIndex = run.nextPulseIndex + i;
+        const uint32_t periodTicks = period_ticks_for_step(run, pulseIndex);
+        if (periodTicks == 0) return false;
+
+        if (enforceHorizon && chunk.pulseCount > 0)
+        {
+            if ((chunk.horizonTicksUsed + periodTicks) > static_cast<uint64_t>(kChunkHorizonTicks)) break;
+        }
+
+        if (!append_pulse_symbols(chunk, periodTicks))
+        {
+            if (chunk.pulseCount == 0) return false;
+            break;
+        }
     }
 
-    return encoded;
-}
-
-MYR_RMT_CALLBACK_ATTR
-static bool on_rmt_tx_done(
-    rmt_channel_handle_t txChannel,
-    const rmt_tx_done_event_data_t *eventData,
-    void *userCtx)
-{
-    (void)txChannel;
-    (void)eventData;
-    (void)userCtx;
-
-    if (!gRunning) return false;
-
-    __atomic_add_fetch(&gTxDoneIsrCount, 1U, __ATOMIC_RELAXED);
-
-    BaseType_t highTaskWoken = pdFALSE;
-    if (gWorkerTask != nullptr)
+    if (chunk.pulseCount == 0)
     {
-        vTaskNotifyGiveFromISR(gWorkerTask, &highTaskWoken);
+        // Always make forward progress, even at very low speed where one period exceeds the horizon.
+        const uint32_t periodTicks = period_ticks_for_step(run, run.nextPulseIndex);
+        if (periodTicks == 0) return false;
+        if (!append_pulse_symbols(chunk, periodTicks)) return false;
     }
-    return highTaskWoken == pdTRUE;
+
+    return chunk.pulseCount > 0;
 }
 
-static esp_err_t ensure_tx_enabled()
+static void set_state(EngineState state)
 {
-    if (gTxEnabled) return ESP_OK;
-    if (gTxChannel == nullptr) return ESP_ERR_INVALID_STATE;
-
-    esp_err_t err = rmt_enable(gTxChannel);
-    if (err == ESP_OK) gTxEnabled = true;
-    return err;
+    portENTER_CRITICAL(&gStateMux);
+    gState = state;
+    portEXIT_CRITICAL(&gStateMux);
 }
 
-static void disable_tx()
+static EngineState read_state()
 {
-    if (!gTxEnabled || gTxChannel == nullptr) return;
+    EngineState state = EngineState::UNINIT;
+    portENTER_CRITICAL(&gStateMux);
+    state = gState;
+    portEXIT_CRITICAL(&gStateMux);
+    return state;
+}
 
-    esp_err_t err = rmt_disable(gTxChannel);
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE)
+static inline bool is_active_state(EngineState state)
+{
+    return state == EngineState::RUNNING || state == EngineState::ABORTING || state == EngineState::START_PENDING;
+}
+
+static void reset_chunk_pipeline()
+{
+    gChunkHead = 0;
+    gChunkTail = 0;
+    gChunkCount = 0;
+}
+
+static bool enqueue_chunk()
+{
+    if (gChunkCount >= kChunkPipelineDepth)
     {
-        ESP_LOGW(TAG, "rmt_disable failed: err=%s", esp_err_to_name(err));
+        set_state(EngineState::ERROR);
+        ESP_LOGE(TAG, "RMT chunk pipeline overflow");
+        return false;
     }
-    gTxEnabled = false;
-}
 
-static uint32_t pulse_count_snapshot()
-{
-    if (gPulseCountUnit == nullptr) return 0;
-
-    int count = 0;
-    if (pcnt_unit_get_count(gPulseCountUnit, &count) != ESP_OK) return 0;
-    if (count < 0) count = 0;
-
-    uint32_t pulses = static_cast<uint32_t>(count);
-    if (pulses > gPulsesTotal) pulses = gPulsesTotal;
-    return pulses;
-}
-
-static void drain_tx_done_events()
-{
-    const uint32_t txDoneEvents = __atomic_exchange_n(&gTxDoneIsrCount, 0U, __ATOMIC_ACQ_REL);
-    for (uint32_t i = 0; i < txDoneEvents; ++i)
+    ChunkBuffer &chunk = gChunkPipeline[gChunkTail];
+    if (!build_next_chunk(gRun, chunk))
     {
-        if (!gRunning) continue;
-        gRunning = false;
-        gCompletionPending = true;
-        gCompletionPulses = pulse_count_snapshot();
+        set_state(EngineState::ERROR);
+        ESP_LOGE(TAG, "RMT chunk build failed at pulse=%u/%u", static_cast<unsigned>(gRun.nextPulseIndex), static_cast<unsigned>(gRun.targetPulses));
+        return false;
     }
+
+    rmt_transmit_config_t txCfg = {};
+    txCfg.loop_count = 0;
+    txCfg.flags.eot_level = 0;
+    txCfg.flags.queue_nonblocking = 0;
+
+    const size_t payloadBytes = static_cast<size_t>(chunk.symbolCount) * sizeof(rmt_symbol_word_t);
+    const esp_err_t err = rmt_transmit(gTxChannel, gCopyEncoder, chunk.symbols, payloadBytes, &txCfg);
+    if (err != ESP_OK)
+    {
+        if (err == ESP_ERR_INVALID_STATE) gMetrics.invalidStateErrors = gMetrics.invalidStateErrors + 1U;
+        set_state(EngineState::ERROR);
+        ESP_LOGE(TAG, "RMT transmit failed: err=%s pulses=%u symbols=%u", esp_err_to_name(err), static_cast<unsigned>(chunk.pulseCount), static_cast<unsigned>(chunk.symbolCount));
+        return false;
+    }
+
+    gChunkTail = static_cast<uint8_t>((gChunkTail + 1U) % kChunkPipelineDepth);
+    gChunkCount = static_cast<uint8_t>(gChunkCount + 1U);
+    gRun.nextPulseIndex = gRun.nextPulseIndex + chunk.pulseCount;
+    gMetrics.txChunksSent = gMetrics.txChunksSent + 1U;
+    return true;
 }
 
-static void emit_completion_if_pending()
+static void finalize_abort_to_idle()
 {
-    if (!gCompletionPending) return;
+    set_state(EngineState::IDLE);
+    const uint64_t nowUs = static_cast<uint64_t>(esp_timer_get_time());
+    if (gAbortRequestedAtUs != 0 && nowUs >= gAbortRequestedAtUs)
+        gMetrics.lastAbortToIdleUs = nowUs - gAbortRequestedAtUs;
 
+    gRun.targetPulses = 0;
+    gRun.nextPulseIndex = 0;
+    reset_chunk_pipeline();
+}
+
+static void handle_start_request()
+{
+    if (read_state() != EngineState::START_PENDING) return;
+
+    gRun = {};
+    gRun.move = gPendingStart;
+    if (gRun.move.startSpeedHz == 0) gRun.move.startSpeedHz = gRun.move.endSpeedHz;
+    if (gRun.move.endSpeedHz == 0) gRun.move.endSpeedHz = gRun.move.startSpeedHz;
+
+    gRun.targetPulses = gRun.move.pulseCount;
+    gRun.activeRunToken = gRun.move.runToken;
+    gRun.activeAbortGen = __atomic_load_n(&gAbortGeneration, __ATOMIC_ACQUIRE);
+    __atomic_store_n(&gPendingTxDoneCount, 0U, __ATOMIC_RELEASE);
+
+    if (gRun.targetPulses == 0 || gRun.move.startSpeedHz == 0 || gRun.move.endSpeedHz == 0)
+    {
+        set_state(EngineState::ERROR);
+        ESP_LOGE(TAG, "start rejected in worker: invalid config pulses=%u startHz=%u endHz=%u",
+                 static_cast<unsigned>(gRun.targetPulses),
+                 static_cast<unsigned>(gRun.move.startSpeedHz),
+                 static_cast<unsigned>(gRun.move.endSpeedHz));
+        return;
+    }
+
+    set_state(EngineState::RUNNING);
+    reset_chunk_pipeline();
+    while (gChunkCount < kChunkPipelineDepth && gRun.nextPulseIndex < gRun.targetPulses)
+    {
+        if (!enqueue_chunk()) break;
+    }
+
+    if (gChunkCount == 0)
+    {
+        set_state(EngineState::ERROR);
+        ESP_LOGE(TAG, "RMT run start failed: no chunk queued");
+        return;
+    }
+
+    ESP_LOGV(TAG, "RMT run started: token=%u pulses=%u abort_gen=%u",
+             static_cast<unsigned>(gRun.activeRunToken),
+             static_cast<unsigned>(gRun.targetPulses),
+             static_cast<unsigned>(gRun.activeAbortGen));
+}
+
+static void handle_abort_request()
+{
+    gMetrics.abortCount = gMetrics.abortCount + 1U;
+    gAbortRequestedAtUs = static_cast<uint64_t>(esp_timer_get_time());
     gCompletionPending = false;
-    const uint32_t completionPulses = gCompletionPulses;
+    gCompletionPulses = 0;
+    gCompletionRunToken = 0;
+    __atomic_store_n(&gPendingTxDoneCount, 0U, __ATOMIC_RELEASE);
 
-    disable_tx();
-    gpio_set_level(gStepPin, 0);
-
-    if (gCompletionCallback != nullptr)
+    const EngineState state = read_state();
+    if (state == EngineState::RUNNING || state == EngineState::START_PENDING)
     {
-        gCompletionCallback(completionPulses, gCompletionCtx);
+        set_state(EngineState::ABORTING);
+        if (gChunkCount == 0)
+        {
+            finalize_abort_to_idle();
+        }
     }
 }
 
-static void process_engine_events()
+static void handle_tx_done_one()
 {
-    drain_tx_done_events();
-    emit_completion_if_pending();
+    if (gChunkCount > 0)
+    {
+        gRun.completedPulses = gRun.completedPulses + gChunkPipeline[gChunkHead].pulseCount;
+        gChunkHead = static_cast<uint8_t>((gChunkHead + 1U) % kChunkPipelineDepth);
+        gChunkCount = static_cast<uint8_t>(gChunkCount - 1U);
+    }
+
+    const EngineState state = read_state();
+    if (state == EngineState::ABORTING)
+    {
+        if (gChunkCount == 0) finalize_abort_to_idle();
+        return;
+    }
+
+    if (state != EngineState::RUNNING)
+    {
+        return;
+    }
+
+    if (gRun.activeAbortGen != __atomic_load_n(&gAbortGeneration, __ATOMIC_ACQUIRE))
+    {
+        set_state(EngineState::ABORTING);
+        finalize_abort_to_idle();
+        return;
+    }
+
+    if (gRun.completedPulses >= gRun.targetPulses)
+    {
+        gCompletionPulses = gRun.completedPulses;
+        gCompletionRunToken = gRun.activeRunToken;
+        gCompletionPending = true;
+        set_state(EngineState::IDLE);
+        gRun.targetPulses = 0;
+        gRun.nextPulseIndex = 0;
+        reset_chunk_pipeline();
+        return;
+    }
+
+    while (gChunkCount < kChunkPipelineDepth && gRun.nextPulseIndex < gRun.targetPulses)
+    {
+        if (!enqueue_chunk()) break;
+    }
+}
+
+static void handle_tx_done_events()
+{
+    while (true)
+    {
+        uint32_t pending = __atomic_load_n(&gPendingTxDoneCount, __ATOMIC_ACQUIRE);
+        if (pending == 0U) break;
+        if (!__atomic_compare_exchange_n(&gPendingTxDoneCount, &pending, pending - 1U, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+            continue;
+        handle_tx_done_one();
+    }
 }
 
 static void pulse_engine_worker(void *arg)
 {
     (void)arg;
+
     while (true)
     {
-        (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        process_engine_events();
+        uint32_t events = 0;
+        if (xTaskNotifyWait(0, UINT32_MAX, &events, portMAX_DELAY) != pdTRUE) continue;
+
+        if ((events & kEvtAbortRequest) != 0U) handle_abort_request();
+        if ((events & kEvtStartRequest) != 0U) handle_start_request();
+        if ((events & kEvtTxDone) != 0U) handle_tx_done_events();
     }
+}
+
+MYR_RMT_CALLBACK_ATTR
+static bool on_rmt_tx_done(rmt_channel_handle_t txChannel, const rmt_tx_done_event_data_t *eventData, void *userCtx)
+{
+    (void)txChannel;
+    (void)eventData;
+    (void)userCtx;
+
+    BaseType_t highTaskWoken = pdFALSE;
+    if (gWorkerTask != nullptr)
+    {
+        (void)__atomic_add_fetch(&gPendingTxDoneCount, 1U, __ATOMIC_ACQ_REL);
+        xTaskNotifyFromISR(gWorkerTask, kEvtTxDone, eSetBits, &highTaskWoken);
+    }
+
+    return highTaskWoken == pdTRUE;
 }
 
 static esp_err_t ensure_worker_task()
 {
     if (gWorkerTask != nullptr) return ESP_OK;
 
-    const BaseType_t created = xTaskCreatePinnedToCore(
+    const BaseType_t ok = xTaskCreatePinnedToCore(
         pulse_engine_worker,
-        "pulse_evt",
+        "pulse_rmt",
         kWorkerTaskStackWords,
         nullptr,
         kWorkerTaskPriority,
         &gWorkerTask,
-        tskNO_AFFINITY);
+        kWorkerTaskCore);
 
-    return created == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
-}
-
-static esp_err_t init_pulse_counter()
-{
-    pcnt_unit_config_t unitConfig = {};
-    unitConfig.low_limit = kPcntLowLimit;
-    unitConfig.high_limit = kPcntHighLimit;
-    unitConfig.intr_priority = 0;
-    unitConfig.flags.accum_count = 1;
-
-    esp_err_t err = pcnt_new_unit(&unitConfig, &gPulseCountUnit);
-    if (err != ESP_OK) return err;
-
-    pcnt_chan_config_t channelConfig = {};
-    channelConfig.edge_gpio_num = gStepPin;
-    channelConfig.level_gpio_num = -1;
-    channelConfig.flags.invert_edge_input = 0;
-    channelConfig.flags.invert_level_input = 0;
-    channelConfig.flags.virt_edge_io_level = 0;
-    channelConfig.flags.virt_level_io_level = 0;
-    channelConfig.flags.io_loop_back = 0;
-    err = pcnt_new_channel(gPulseCountUnit, &channelConfig, &gPulseCountChannel);
-    if (err != ESP_OK) return err;
-
-    err = pcnt_channel_set_edge_action(gPulseCountChannel, PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_HOLD);
-    if (err != ESP_OK) return err;
-
-    err = pcnt_channel_set_level_action(gPulseCountChannel, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_KEEP);
-    if (err != ESP_OK) return err;
-
-    err = pcnt_unit_add_watch_point(gPulseCountUnit, kPcntHighLimit);
-    if (err != ESP_OK) return err;
-
-    err = pcnt_unit_set_glitch_filter(gPulseCountUnit, nullptr);
-    if (err != ESP_OK) return err;
-
-    err = pcnt_unit_enable(gPulseCountUnit);
-    if (err != ESP_OK) return err;
-
-    err = pcnt_unit_clear_count(gPulseCountUnit);
-    if (err != ESP_OK) return err;
-
-    return pcnt_unit_start(gPulseCountUnit);
+    return ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
 }
 } // namespace
 
@@ -322,6 +518,7 @@ bool PulseEngine::isInitialized = false;
 esp_err_t PulseEngine::init(gpio_num_t stepPin)
 {
     if (isInitialized) return ESP_OK;
+
     gStepPin = stepPin;
 
     gpio_config_t io = {};
@@ -338,42 +535,52 @@ esp_err_t PulseEngine::init(gpio_num_t stepPin)
     err = ensure_worker_task();
     if (err != ESP_OK) return err;
 
-    err = init_pulse_counter();
+    rmt_tx_channel_config_t txCfg = {};
+    txCfg.gpio_num = gStepPin;
+    txCfg.clk_src = RMT_CLK_SRC_DEFAULT;
+    txCfg.resolution_hz = kRmtResolutionHz;
+    txCfg.mem_block_symbols = kRmtMemBlockSymbols;
+    txCfg.trans_queue_depth = kRmtQueueDepth;
+    txCfg.intr_priority = kRmtIntrPriority;
+    txCfg.flags.with_dma = 0;
+    txCfg.flags.invert_out = 0;
+    txCfg.flags.io_loop_back = 0;
+    txCfg.flags.io_od_mode = 0;
+    txCfg.flags.allow_pd = 0;
+
+    err = rmt_new_tx_channel(&txCfg, &gTxChannel);
     if (err != ESP_OK) return err;
 
-    rmt_tx_channel_config_t txConfig = {};
-    txConfig.gpio_num = gStepPin;
-    txConfig.clk_src = RMT_CLK_SRC_DEFAULT;
-    txConfig.resolution_hz = kRmtResolutionHz;
-    txConfig.mem_block_symbols = kRmtMemBlockSymbols;
-    txConfig.trans_queue_depth = kRmtQueueDepth;
-    txConfig.intr_priority = kRmtIntrPriority;
-    txConfig.flags.invert_out = 0;
-    txConfig.flags.with_dma = 0;
-    txConfig.flags.io_loop_back = 0;
-    txConfig.flags.io_od_mode = 0;
-    txConfig.flags.allow_pd = 0;
-
-    err = rmt_new_tx_channel(&txConfig, &gTxChannel);
+    rmt_copy_encoder_config_t copyCfg = {};
+    err = rmt_new_copy_encoder(&copyCfg, &gCopyEncoder);
     if (err != ESP_OK) return err;
 
-    rmt_tx_event_callbacks_t callbacks = {};
-    callbacks.on_trans_done = on_rmt_tx_done;
-    err = rmt_tx_register_event_callbacks(gTxChannel, &callbacks, nullptr);
+    rmt_tx_event_callbacks_t cb = {};
+    cb.on_trans_done = on_rmt_tx_done;
+    err = rmt_tx_register_event_callbacks(gTxChannel, &cb, nullptr);
     if (err != ESP_OK) return err;
 
-    rmt_simple_encoder_config_t encoderConfig = {};
-    encoderConfig.callback = encode_pulse_train;
-    encoderConfig.arg = nullptr;
-    encoderConfig.min_chunk_size = 16;
-    err = rmt_new_simple_encoder(&encoderConfig, &gEncoder);
+    err = rmt_enable(gTxChannel);
     if (err != ESP_OK) return err;
 
-    err = ensure_tx_enabled();
-    if (err != ESP_OK) return err;
+    gPulseHighTicks = static_cast<uint16_t>((kRmtResolutionHz * kPulseHighUs) / 1000000U);
+    if (gPulseHighTicks == 0) gPulseHighTicks = 1;
 
-    gHighTicks = (kRmtResolutionHz * kPulseHighUs) / 1000000U;
-    if (gHighTicks == 0) gHighTicks = 1;
+    gMetrics = {};
+    gRun = {};
+    reset_chunk_pipeline();
+    gCompletionPending = false;
+    gCompletionPulses = 0;
+    gCompletionRunToken = 0;
+    __atomic_store_n(&gAbortGeneration, 1U, __ATOMIC_RELEASE);
+    set_state(EngineState::IDLE);
+
+    ESP_LOGI(TAG,
+             "RMT init: step_pin=%d horizon_us=%u max_chunk_steps=%u worker_core=%d",
+             static_cast<int>(gStepPin),
+             static_cast<unsigned>(kChunkHorizonUs),
+             static_cast<unsigned>(kChunkMaxSteps),
+             static_cast<int>(kWorkerTaskCore));
 
     isInitialized = true;
     return ESP_OK;
@@ -391,66 +598,70 @@ esp_err_t PulseEngine::startPulses(const StartConfig &config)
     if (config.pulseCount == 0) return ESP_ERR_INVALID_ARG;
     if (config.startSpeedHz == 0 && config.endSpeedHz == 0) return ESP_ERR_INVALID_ARG;
 
-    gRunning = false;
-    gCompletionPending = false;
-    gCompletionPulses = 0;
-    __atomic_store_n(&gTxDoneIsrCount, 0U, __ATOMIC_RELEASE);
-
-    disable_tx();
-    gpio_set_level(gStepPin, 0);
-
-    gMove = config;
-    if (gMove.startSpeedHz == 0) gMove.startSpeedHz = gMove.endSpeedHz;
-    if (gMove.endSpeedHz == 0) gMove.endSpeedHz = gMove.startSpeedHz;
-    gPulsesTotal = gMove.pulseCount;
-
-    gEncodeProgress.pulseIndex = 0;
-    gEncodeProgress.lowTailTicks = 0;
-    (void)pcnt_unit_clear_count(gPulseCountUnit);
-
-    esp_err_t err = ensure_tx_enabled();
-    if (err != ESP_OK) return err;
-
-    rmt_transmit_config_t txConfig = {};
-    txConfig.loop_count = 0;
-    txConfig.flags.eot_level = 0;
-    txConfig.flags.queue_nonblocking = 0;
-
-    gRunning = true;
-    err = rmt_transmit(gTxChannel, gEncoder, &gMove, sizeof(gMove), &txConfig);
-    if (err != ESP_OK)
+    const EngineState state = read_state();
+    if (state != EngineState::IDLE)
     {
-        gRunning = false;
-        disable_tx();
-        gpio_set_level(gStepPin, 0);
-        return err;
+        gMetrics.invalidStateErrors = gMetrics.invalidStateErrors + 1U;
+        return ESP_ERR_INVALID_STATE;
     }
 
+    gPendingStart = config;
+    gMetrics.restartCount = gMetrics.restartCount + 1U;
+    set_state(EngineState::START_PENDING);
+
+    xTaskNotify(gWorkerTask, kEvtStartRequest, eSetBits);
     return ESP_OK;
 }
 
 uint32_t PulseEngine::stop()
 {
-    gRunning = false;
+    if (!isInitialized) return 0;
+    if (gWorkerTask == nullptr) return 0;
+
+    const EngineState state = read_state();
+    if (!is_active_state(state))
+    {
+        gCompletionPending = false;
+        gCompletionPulses = 0;
+        gCompletionRunToken = 0;
+        return 0;
+    }
+
     gCompletionPending = false;
-    __atomic_store_n(&gTxDoneIsrCount, 0U, __ATOMIC_RELEASE);
+    gCompletionPulses = 0;
+    gCompletionRunToken = 0;
+    (void)__atomic_add_fetch(&gAbortGeneration, 1U, __ATOMIC_ACQ_REL);
+    xTaskNotify(gWorkerTask, kEvtAbortRequest, eSetBits);
 
-    const uint32_t pulses = pulse_count_snapshot();
+    const int64_t waitStartUs = esp_timer_get_time();
+    while (is_active_state(read_state()))
+    {
+        const int64_t elapsedUs = esp_timer_get_time() - waitStartUs;
+        if (elapsedUs >= static_cast<int64_t>(kStopSyncTimeoutUs))
+        {
+            ESP_LOGW(TAG, "RMT stop sync timed out at state=%u", static_cast<unsigned>(read_state()));
+            break;
+        }
+        taskYIELD();
+    }
 
-    disable_tx();
-    gpio_set_level(gStepPin, 0);
-    return pulses;
+    return gRun.completedPulses;
 }
 
 void PulseEngine::service()
 {
-    if (gWorkerTask == nullptr)
-    {
-        process_engine_events();
-    }
+    if (!gCompletionPending) return;
+
+    const uint32_t pulses = gCompletionPulses;
+    const uint32_t token = gCompletionRunToken;
+    gCompletionPending = false;
+
+    if (gCompletionCallback != nullptr)
+        gCompletionCallback(pulses, token, gCompletionCtx);
 }
 
 bool PulseEngine::isRunning()
 {
-    return gRunning;
+    const EngineState state = read_state();
+    return state == EngineState::RUNNING || state == EngineState::ABORTING || state == EngineState::START_PENDING;
 }
