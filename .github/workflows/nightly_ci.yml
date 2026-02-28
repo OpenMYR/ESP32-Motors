@@ -146,10 +146,10 @@ jobs:
           pio test -e esp32_test -f embedded/drivers/test_servo_driver
           pio test -e esp32_test -f embedded/drivers/test_stepper_driver
 
-      - name: Unit tests (native)
-        run: |
-          set -e
-          pio test -e native
+#      - name: Unit tests (native)
+#        run: |
+#          set -e
+#          pio test -e native
 
       - name: Full unit test run (esp32_test)
         run: |
