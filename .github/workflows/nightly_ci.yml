@@ -1,0 +1,157 @@
+# .github/workflows/nightly_ci.yml
+name: Nightly_CI
+
+on:
+  schedule:
+    - cron: "17 3 * * *"   # nightly (UTC)
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changed_areas:
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.check.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+          SINCE="24 hours ago"
+          if git log --since="$SINCE" --name-only --pretty=format: -- \
+              src components include lib platformio.ini .github/workflows | \
+              sed '/^\s*$/d' | grep -q .; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  smoke_linux:
+    name: Smoke Build (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: "recursive"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip + PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio
+            .pio
+          key: ubuntu-pio-${{ hashFiles('**/platformio.ini') }}
+          restore-keys: |
+            ubuntu-pio-
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade platformio
+
+      - name: Smoke compile
+        run: |
+          platformio run -e esp32
+
+  smoke_winmac:
+    name: Smoke Build (${{ matrix.os }})
+    needs: [changed_areas, smoke_linux]
+    if: ${{ needs.changed_areas.outputs.relevant == 'true' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: "recursive"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip + PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio
+            .pio
+          key: ${{ runner.os }}-pio-${{ hashFiles('**/platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade platformio
+
+      - name: Smoke compile
+        run: |
+          platformio run -e esp32
+
+  ESP32_COM_CI:
+    name: ESP32_COM_CI
+    runs-on: esp32-com
+    needs: [smoke_linux, smoke_winmac]
+    if: |
+      needs.smoke_linux.result == 'success' &&
+      (needs.smoke_winmac.result == 'success' || needs.smoke_winmac.result == 'skipped')
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: "recursive"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip + PlatformIO (self-hosted)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio
+            .pio
+          key: esp32com-pio-${{ hashFiles('**/platformio.ini') }}
+          restore-keys: |
+            esp32com-pio-
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade platformio
+
+      - name: Unit test smoke (esp32_test)
+        run: |
+          set -e
+          pio test -e esp32_test -f embedded/test_demo
+          pio test -e esp32_test -f embedded/drivers/test_servo_driver
+          pio test -e esp32_test -f embedded/drivers/test_stepper_driver
+
+#      - name: Unit tests (native)
+#        run: |
+#          set -e
+#          pio test -e native
+
+      - name: Full unit test run (esp32_test)
+        run: |
+          set -e
+          pio test -e esp32_test
