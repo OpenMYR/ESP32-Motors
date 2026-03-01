@@ -41,22 +41,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
 
-      - name: Cache pip + PlatformIO
+      - name: Cache PlatformIO
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cache/pip
             ~/.platformio
-            .pio
-          key: ubuntu-pio-${{ hashFiles('**/platformio.ini') }}
+          key: pio-${{ runner.os }}-py3.12-${{ hashFiles('**/platformio.ini') }}
           restore-keys: |
-            ubuntu-pio-
+            pio-${{ runner.os }}-py3.12-
 
-      - name: Install PlatformIO
+      - name: Install PlatformIO + deps
         run: |
           python -m pip install --upgrade pip
-          pip install --upgrade platformio
+          python -m pip install --upgrade platformio intelhex
 
       - name: Smoke compile
         run: |
@@ -73,26 +72,26 @@ jobs:
         with:
           submodules: "recursive"
 
-      - name: Install dependencies
-        run: |
-          python3 -m pip install --upgrade pip
-          pip3 install --upgrade platformio
-
-      - name: Cache pip + PlatformIO (self-hosted)
+      - name: Cache pip (self-hosted)
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.cache/pip
-            ~/.platformio
-            .pio
-          key: esp32com-pio-${{ hashFiles('**/platformio.ini') }}
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-py-${{ hashFiles('.github/workflows/default_ci.yml') }}
           restore-keys: |
-            esp32com-pio-
+            pip-${{ runner.os }}-py-
 
-      - name: Install PlatformIO
+      - name: Cache PlatformIO (self-hosted)
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('**/platformio.ini') }}
+          restore-keys: |
+            pio-${{ runner.os }}-
+
+      - name: Install PlatformIO + deps (system python)
         run: |
-          python -m pip install --upgrade pip
-          pip install --upgrade platformio
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --upgrade platformio intelhex
 
       - name: Unit test smoke (embedded)
         run: |
