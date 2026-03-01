@@ -135,7 +135,7 @@ void drain_queue_task(void *arg)
 void wait_for_monitor_attach(void)
 {
     for (int i = 0; i < 16; ++i) {
-        printf("test_web_command_ingest bootstrap %d/16\n", i + 1);
+        printf("test_web_command_ingest_stepper bootstrap %d/16\n", i + 1);
         vTaskDelay(pdMS_TO_TICKS(250));
     }
 }
