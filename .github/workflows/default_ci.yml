@@ -94,19 +94,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install --upgrade platformio
 
-      - name: Unit test smoke (esp32_test)
+      - name: Unit test smoke (embedded)
         run: |
           set -e
           pio test -e esp32_test -f embedded/test_demo
-          pio test -e esp32_test -f embedded/drivers/test_servo_driver
-          pio test -e esp32_test -f embedded/drivers/test_stepper_driver
+          pio test -e esp32_test_servo -f embedded/drivers/test_servo_driver
+          pio test -e esp32_test_stepper -f embedded/drivers/test_stepper_driver
 
 #      - name: Unit tests (native)
 #        run: |
 #          set -e
 #          pio test -e native
 
-      - name: Full unit test run (esp32_test)
+      - name: Full unit test run (embedded)
         run: |
           set -e
-          pio test -e esp32_test
+          pio test -e esp32_test_stepper
+          pio test -e esp32_test_servo
