@@ -42,6 +42,16 @@ struct ServoPwmChannelConfig {
 const char *TAG = "ServoDriver";
 uint8_t sPeekTicks = 5;
 uint8_t sPeekRate = 5;
+constexpr uint32_t kMotorLoopStackWords = 4096;
+constexpr UBaseType_t kMotorLoopPriority = 1;
+
+bool resolve_motor_index(uint8_t motorID, uint8_t *motorIndex)
+{
+    if (motorIndex == nullptr) return false;
+    if (motorID < 1 || motorID > MAX_MOTORS) return false;
+    *motorIndex = static_cast<uint8_t>(motorID - 1);
+    return true;
+}
 
 ServoPwmChannelConfig resolve_pwm_channel(uint8_t motorIndex)
 {
@@ -169,26 +179,25 @@ void ServoDriver::writeServoAngle(uint8_t motorIndex, int angle)
  */
 void ServoDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID)
 {
-    if (motorID > MAX_MOTORS)
-        return;
-    motorID--; //motors are 1-15, we want 0-14
+    uint8_t motorIndex = 0;
+    if (!resolve_motor_index(motorID, &motorIndex)) return;
 
-    if(motorSleeping[motorID]){
-        motorSleeping[motorID] = false;
-        attachPwmChannel(motorID);
+    if(motorSleeping[motorIndex]){
+        motorSleeping[motorIndex] = false;
+        attachPwmChannel(motorIndex);
     }
 
-    motorDwell[motorID] = false;
-    motorSleeping[motorID] = false;
-    startAngle[motorID] = currentAngle[motorID];
-    commandDeltaAngle[motorID] = targetAngle - currentAngle[motorID];
-    startTime[motorID] = esp_timer_get_time();
-    commandDeltaTime[motorID] = 1000000 / rate * abs(commandDeltaAngle[motorID]);
+    motorDwell[motorIndex] = false;
+    motorSleeping[motorIndex] = false;
+    startAngle[motorIndex] = currentAngle[motorIndex];
+    commandDeltaAngle[motorIndex] = targetAngle - currentAngle[motorIndex];
+    startTime[motorIndex] = esp_timer_get_time();
+    commandDeltaTime[motorIndex] = 1000000 / rate * abs(commandDeltaAngle[motorIndex]);
 
-    commandDone[motorID] = false;
-    ESP_LOGV(TAG, "command %d %d %llu %llu ", startAngle[motorID], commandDeltaAngle[motorID],
-             static_cast<unsigned long long>(startTime[motorID]),
-             static_cast<unsigned long long>(commandDeltaTime[motorID]));
+    commandDone[motorIndex] = false;
+    ESP_LOGV(TAG, "command %d %d %llu %llu ", startAngle[motorIndex], commandDeltaAngle[motorIndex],
+             static_cast<unsigned long long>(startTime[motorIndex]),
+             static_cast<unsigned long long>(commandDeltaTime[motorIndex]));
 }
 
 /**
@@ -199,28 +208,26 @@ void ServoDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID)
  */
 void ServoDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorID)
 {
-    if (motorID > MAX_MOTORS)
-        return;
-    if (rate == 0)
-        return;
-    motorID--; //motors are 1-15, we want 0-14
+    uint8_t motorIndex = 0;
+    if (!resolve_motor_index(motorID, &motorIndex)) return;
+    if (rate == 0) return;
 
-    if(motorSleeping[motorID]){
-        motorSleeping[motorID] = false;
-        attachPwmChannel(motorID);
+    if(motorSleeping[motorIndex]){
+        motorSleeping[motorIndex] = false;
+        attachPwmChannel(motorIndex);
     }
 
-    motorDwell[motorID] = false;
-    motorSleeping[motorID] = false;
-    startAngle[motorID] = currentAngle[motorID];
-    commandDeltaAngle[motorID] = targetAngle - currentAngle[motorID];
-    startTime[motorID] = esp_timer_get_time();
-    commandDeltaTime[motorID] = (uint64_t)commandDeltaAngle[motorID] * rate * 1000000;
+    motorDwell[motorIndex] = false;
+    motorSleeping[motorIndex] = false;
+    startAngle[motorIndex] = currentAngle[motorIndex];
+    commandDeltaAngle[motorIndex] = targetAngle - currentAngle[motorIndex];
+    startTime[motorIndex] = esp_timer_get_time();
+    commandDeltaTime[motorIndex] = (uint64_t)commandDeltaAngle[motorIndex] * rate * 1000000;
 
-    commandDone[motorID] = false;
-    ESP_LOGV(TAG, "command %d %d %llu %llu ", startAngle[motorID], commandDeltaAngle[motorID],
-             static_cast<unsigned long long>(startTime[motorID]),
-             static_cast<unsigned long long>(commandDeltaTime[motorID]));
+    commandDone[motorIndex] = false;
+    ESP_LOGV(TAG, "command %d %d %llu %llu ", startAngle[motorIndex], commandDeltaAngle[motorIndex],
+             static_cast<unsigned long long>(startTime[motorIndex]),
+             static_cast<unsigned long long>(commandDeltaTime[motorIndex]));
 }
 
 /**
@@ -233,24 +240,23 @@ void ServoDriver::motorStop(int32_t wait_time, uint16_t precision, uint8_t motor
 {
     // wait_time, cycles to wait
     // precision, duration of wait cycle in milliseconds
-    if (motorID > MAX_MOTORS)
-        return;
-    motorID--;
+    uint8_t motorIndex = 0;
+    if (!resolve_motor_index(motorID, &motorIndex)) return;
 
-    if(motorSleeping[motorID]){
-        motorSleeping[motorID] = false;
-        attachPwmChannel(motorID);
+    if(motorSleeping[motorIndex]){
+        motorSleeping[motorIndex] = false;
+        attachPwmChannel(motorIndex);
     }
 
-    motorDwell[motorID] = true;
-    motorSleeping[motorID] = false;
-    startTime[0] = esp_timer_get_time();
-    commandDeltaTime[motorID] = (abs(wait_time) * precision);
-    commandDone[motorID] = false;
+    motorDwell[motorIndex] = true;
+    motorSleeping[motorIndex] = false;
+    startTime[motorIndex] = esp_timer_get_time();
+    commandDeltaTime[motorIndex] = (abs(wait_time) * precision);
+    commandDone[motorIndex] = false;
 
-    ESP_LOGV(TAG, "command %d %d %llu %llu ", startAngle[motorID], commandDeltaAngle[motorID],
-             static_cast<unsigned long long>(startTime[motorID]),
-             static_cast<unsigned long long>(commandDeltaTime[motorID]));
+    ESP_LOGV(TAG, "command %d %d %llu %llu ", startAngle[motorIndex], commandDeltaAngle[motorIndex],
+             static_cast<unsigned long long>(startTime[motorIndex]),
+             static_cast<unsigned long long>(commandDeltaTime[motorIndex]));
 }
 
 /**
@@ -263,21 +269,20 @@ void ServoDriver::motorSleep(signed int wait_time, unsigned short precision, uin
 {
     // wait_time, cycles to wait
     // precision, duration of wait cycle in milliseconds
-    if (motorID > MAX_MOTORS)
-        return;
-    motorID--;
+    uint8_t motorIndex = 0;
+    if (!resolve_motor_index(motorID, &motorIndex)) return;
 
-    motorDwell[motorID] = true;
-    motorSleeping[motorID] = true;
-    startTime[0] = esp_timer_get_time();
-    commandDeltaTime[motorID] = (abs(wait_time) * precision);
-    commandDone[motorID] = false;
+    motorDwell[motorIndex] = true;
+    motorSleeping[motorIndex] = true;
+    startTime[motorIndex] = esp_timer_get_time();
+    commandDeltaTime[motorIndex] = (abs(wait_time) * precision);
+    commandDone[motorIndex] = false;
 
-    detachPwmChannel(motorID);
+    detachPwmChannel(motorIndex);
 
-    ESP_LOGV(TAG, "command %d %d %llu %llu ", startAngle[motorID], commandDeltaAngle[motorID],
-             static_cast<unsigned long long>(startTime[motorID]),
-             static_cast<unsigned long long>(commandDeltaTime[motorID]));
+    ESP_LOGV(TAG, "command %d %d %llu %llu ", startAngle[motorIndex], commandDeltaAngle[motorIndex],
+             static_cast<unsigned long long>(startTime[motorIndex]),
+             static_cast<unsigned long long>(commandDeltaTime[motorIndex]));
 }
 
 /**
@@ -286,25 +291,27 @@ void ServoDriver::motorSleep(signed int wait_time, unsigned short precision, uin
  */
 void ServoDriver::abortCommand(uint8_t motorID)
 {
-    if (motorID > MAX_MOTORS)
-        return;
-    motorID--;
-    commandDone[motorID] = true;
+    uint8_t motorIndex = 0;
+    if (!resolve_motor_index(motorID, &motorIndex)) return;
+    commandDone[motorIndex] = true;
 }
 /**
  * @brief Launch the servo driver loop on CORE_1.
  */
 void ServoDriver::isrStartIoDriver()
 {
-    
-    xTaskCreatePinnedToCore(
+    BaseType_t ok = xTaskCreatePinnedToCore(
         isrIo,
         "motorloop",
-        2000,
+        kMotorLoopStackWords,
         (void *)1,
-        0,
+        kMotorLoopPriority,
         &motorTaskDriver,
         CORE_1);
+    if (ok != pdPASS)
+    {
+        ESP_LOGE(TAG, "motorloop task creation failed");
+    }
 }
 
 /**
@@ -333,10 +340,9 @@ void IRAM_ATTR ServoDriver::isrIo(void *)
  */
 bool ServoDriver::isMotorRunning(uint8_t motor_id)
 {
-    if (motor_id > MAX_MOTORS)
-        return false;
-    motor_id--;
-    return !commandDone[motor_id];
+    uint8_t motorIndex = 0;
+    if (!resolve_motor_index(motor_id, &motorIndex)) return false;
+    return !commandDone[motorIndex];
 }
 
 /**
@@ -391,7 +397,8 @@ void IRAM_ATTR ServoDriver::driver()
             }
         }
 
-        vTaskDelay(0);
+        // Always yield at least one tick so IDLE1 can run and service task watchdog.
+        vTaskDelay(1);
     }
     vTaskDelete(NULL);
 }
@@ -423,11 +430,10 @@ void ServoDriver::peekOpForDriver(uint8_t id)
  */
 void ServoDriver::changeMotorSettings(config_setting setting, uint32_t data1, uint32_t data2, uint8_t motorID)
 {
-    if (motorID > MAX_MOTORS)
-        return;
-    motorID--; //motors are 1-15, we want 0-14
+    uint8_t motorIndex = 0;
+    if (!resolve_motor_index(motorID, &motorIndex)) return;
 
-    commandDone[motorID] = false;
+    commandDone[motorIndex] = false;
     if (data2 < MAX_MOTORS)
     {
         if (setting == MAX_SERVO_BOUND)
@@ -440,5 +446,5 @@ void ServoDriver::changeMotorSettings(config_setting setting, uint32_t data1, ui
         }
     }
 
-    commandDone[motorID] = true;
+    commandDone[motorIndex] = true;
 }
