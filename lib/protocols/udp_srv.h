@@ -9,9 +9,6 @@
 #include "CommandParser.h"
 #include "Op.h"
 
-#define CTRL_PACKET_LEN_BYTES 11
-#define WIFI_PACKET_LEN_BYTES 96
-
 /**
  * @brief UDP ingress/egress service for command and discovery traffic.
  *

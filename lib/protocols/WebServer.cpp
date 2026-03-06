@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <string>
 
+#include "CommandParser.h"
 #include "WifiController.h"
 #include "OpBuffer.h"
 #include "WebCommandDispatcher.h"
@@ -171,8 +172,11 @@ esp_err_t post_ota_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
+    CommandParser::enter_ota_mode();
+
     const esp_partition_t *update_partition = esp_ota_get_next_update_partition(nullptr);
     if (update_partition == nullptr) {
+        CommandParser::exit_ota_mode();
         ESP_LOGE(TAG, "Failed to find OTA update partition");
         httpd_resp_send_500(req);
         return ESP_FAIL;
@@ -181,6 +185,7 @@ esp_err_t post_ota_handler(httpd_req_t *req) {
     esp_ota_handle_t ota_handle;
     esp_err_t err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &ota_handle);
     if (err != ESP_OK) {
+        CommandParser::exit_ota_mode();
         ESP_LOGE(TAG, "esp_ota_begin failed (%s)", esp_err_to_name(err));
         httpd_resp_send_500(req);
         return err;
@@ -195,6 +200,7 @@ esp_err_t post_ota_handler(httpd_req_t *req) {
                 continue;
             }
             esp_ota_abort(ota_handle);
+            CommandParser::exit_ota_mode();
             ESP_LOGE(TAG, "Failed to receive OTA chunk");
             httpd_resp_send_500(req);
             return ESP_FAIL;
@@ -203,6 +209,7 @@ esp_err_t post_ota_handler(httpd_req_t *req) {
         err = esp_ota_write(ota_handle, ota_chunk, read);
         if (err != ESP_OK) {
             esp_ota_abort(ota_handle);
+            CommandParser::exit_ota_mode();
             ESP_LOGE(TAG, "esp_ota_write failed (%s)", esp_err_to_name(err));
             httpd_resp_send_500(req);
             return err;
@@ -211,6 +218,7 @@ esp_err_t post_ota_handler(httpd_req_t *req) {
     }
 
     if (esp_ota_end(ota_handle) != ESP_OK) {
+        CommandParser::exit_ota_mode();
         ESP_LOGE(TAG, "esp_ota_end failed");
         httpd_resp_send_500(req);
         return ESP_FAIL;
@@ -218,6 +226,7 @@ esp_err_t post_ota_handler(httpd_req_t *req) {
 
     err = esp_ota_set_boot_partition(update_partition);
     if (err != ESP_OK) {
+        CommandParser::exit_ota_mode();
         ESP_LOGE(TAG, "esp_ota_set_boot_partition failed (%s)", esp_err_to_name(err));
         httpd_resp_send_500(req);
         return err;

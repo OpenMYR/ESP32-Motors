@@ -1,7 +1,13 @@
 #ifndef MYR_OP_H
 #define MYR_OP_H
 
+#include <stddef.h>
 #include <stdint.h>
+
+constexpr size_t kCtrlPacketLenBytes = 11;
+constexpr size_t kWifiCommandSsidLen = 32;
+constexpr size_t kWifiCommandPasswordLen = 63;
+constexpr size_t kWifiPacketLenBytes = 1 + kWifiCommandSsidLen + kWifiCommandPasswordLen;
 
 typedef struct Op {
     unsigned short port;
@@ -51,8 +57,11 @@ struct command_response_packet {
 
 struct wifi_command_packet {
 	char opcode;
-	char ssid[32] ;
-	char password[63];
+	char ssid[kWifiCommandSsidLen];
+	char password[kWifiCommandPasswordLen];
 };
+
+static_assert(sizeof(wifi_command_packet) == kWifiPacketLenBytes,
+              "wifi_command_packet size must match UDP wire size");
 
 #endif // MYR_OP_H

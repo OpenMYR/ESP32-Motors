@@ -74,7 +74,7 @@ void setup()
             if (UDP_server)
                 UDP_server->end();
             WebServer::reset();
-            CommandParser::stop_motors();
+            CommandParser::enter_ota_mode();
 
             if (ArduinoOTA.getCommand() == U_FLASH)
                 type = "sketch";

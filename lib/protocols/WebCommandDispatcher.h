@@ -2,18 +2,12 @@
 #define MYR_WEB_COMMAND_DISPATCHER_H
 
 #include <stdint.h>
-#include <string>
 
+#include "CommandParser.h"
 #include "esp_err.h"
 
 namespace WebCommandDispatcher {
-struct WifiOps {
-    esp_err_t (*tryConnectToSta)(const std::string *ssid, const std::string *pass);
-    esp_err_t (*setDefaultStaCredentials)(const std::string *ssid, const std::string *pass);
-    esp_err_t (*setDefaultMode)(uint16_t mode);
-    void (*fireDisconnectEvent)();
-    esp_err_t (*changeOtaPass)(const std::string *old_pass, const std::string *new_pass);
-};
+using WifiOps = CommandParser::WifiOps;
 
 esp_err_t processPayload(const char *payload);
 void setWifiOpsForTest(const WifiOps *ops);

@@ -105,7 +105,7 @@ void udp_srv::udp_task_entry(void *arg)
 
 void udp_srv::udp_task()
 {
-    uint8_t buffer[WIFI_PACKET_LEN_BYTES];
+    uint8_t buffer[kWifiPacketLenBytes];
 
     while (running) {
         sockaddr_in remote_addr = {};
@@ -138,13 +138,13 @@ void udp_srv::handle_packet(const uint8_t *data, size_t len, uint32_t remote_add
     ip4_addr_t remote_ip = {};
     remote_ip.addr = htonl(remote_addr);
 
-    if (len == CTRL_PACKET_LEN_BYTES) {
+    if (len == kCtrlPacketLenBytes) {
         Op motor_packet(const_cast<uint8_t *>(data), remote_addr);
         CommandParser::motor_process_command(motor_packet, remote_ip);
         return;
     }
 
-    if (len == WIFI_PACKET_LEN_BYTES) {
+    if (len == kWifiPacketLenBytes) {
         wifi_command_packet wifi_packet = {};
         memcpy(&wifi_packet, data, sizeof(wifi_packet));
         CommandParser::wifi_process_command(wifi_packet, remote_ip);
