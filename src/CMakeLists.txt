@@ -6,6 +6,7 @@ idf_component_register(
         "../lib/generic/Lookup.cpp"
         "../lib/generic/FileIO.cpp"
         "../lib/Op/OpBuffer.cpp"
+        "../lib/middleware/CommandParser.cpp"
         "../lib/middleware/CommandLayer.cpp"
         "../lib/IoDrivers/PulseEngine.cpp"
         "../lib/IoDrivers/EndStop.cpp"
@@ -13,6 +14,8 @@ idf_component_register(
         "../lib/IoDrivers/StepperDriver.cpp"
         "../lib/protocols/WebCommandDispatcher.cpp"
         "../lib/protocols/WebServer.cpp"
+        "../lib/protocols/UdpPromptScheduler.cpp"
+        "../lib/protocols/udp_srv.cpp"
     INCLUDE_DIRS
         "../include"
         "../lib/WiFi"
@@ -33,4 +36,5 @@ idf_component_register(
         esp_timer
         app_update
         mbedtls
+        mdns
 )

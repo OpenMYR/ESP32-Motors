@@ -44,6 +44,7 @@ class WifiController {
     static esp_err_t changeOTAPass(const std::string *oldPass, const std::string *pass);
     static std::string getOTAPassword();
     static myr_wifi_state_t getWiFiState();
+    static esp_err_t getActiveBroadcastAddress(esp_ip4_addr_t *addr);
 
     // Test-helper: pumps the WifiController state event loop to process
     // any queued events. Intended for unit tests to avoid race coditions.

@@ -292,6 +292,10 @@ bool WebServer::init() {
     config.uri_match_fn = httpd_uri_match_wildcard;
     // POST processing includes request-body buffering and JSON parse work.
     config.stack_size = 8192;
+    // Evict stale least-recently-used sockets when scanner churn exhausts accept slots.
+    config.lru_purge_enable = true;
+    // Keep headroom for non-HTTP sockets (UDP/mDNS/system) to avoid global fd exhaustion.
+    config.max_open_sockets = 4;
 
     esp_err_t err = httpd_start(&g_server, &config);
     if (err != ESP_OK) {

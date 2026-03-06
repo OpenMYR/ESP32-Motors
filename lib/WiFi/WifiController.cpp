@@ -418,6 +418,42 @@ std::string WifiController::getOTAPassword() {
     return getValue(MYR_WIFI_PREF_TAG_OTA_PASS, MYR_OTA_DEFAULT_PASSWORD);
 }
 
+esp_err_t WifiController::getActiveBroadcastAddress(esp_ip4_addr_t *addr) {
+    if (addr == nullptr) return ESP_ERR_INVALID_ARG;
+
+    auto compute_broadcast = [](esp_netif_t *netif, esp_ip4_addr_t *out_addr) -> esp_err_t {
+        if (netif == nullptr) return ESP_ERR_INVALID_STATE;
+
+        esp_netif_ip_info_t ip_info = {};
+        esp_err_t err = esp_netif_get_ip_info(netif, &ip_info);
+        if (err != ESP_OK) return err;
+        if (ip_info.ip.addr == 0 || ip_info.netmask.addr == 0) return ESP_ERR_INVALID_STATE;
+
+        out_addr->addr = (ip_info.ip.addr & ip_info.netmask.addr) | (~ip_info.netmask.addr);
+        return ESP_OK;
+    };
+
+    switch (state) {
+    case MYR_WIFI_STATE_AP:
+        return compute_broadcast(ap_netif, addr);
+    case MYR_WIFI_STATE_STA:
+    case MYR_WIFI_STATE_STA_CONNECTING:
+        return compute_broadcast(sta_netif, addr);
+    case MYR_WIFI_STATE_AP_STA_CONNECTING: {
+        esp_err_t err = compute_broadcast(ap_netif, addr);
+        if (err == ESP_OK) return ESP_OK;
+        return compute_broadcast(sta_netif, addr);
+    }
+    case MYR_WIFI_STATE_AP_STA_RAMPDOWN: {
+        esp_err_t err = compute_broadcast(sta_netif, addr);
+        if (err == ESP_OK) return ESP_OK;
+        return compute_broadcast(ap_netif, addr);
+    }
+    default:
+        return ESP_ERR_INVALID_STATE;
+    }
+}
+
 esp_err_t WifiController::saveValue(const char *id, const std::string *value) {
     nvs_handle_t nvsHandle;
     esp_err_t err = nvs_open(kNvsNamespace, NVS_READWRITE, &nvsHandle);
@@ -686,6 +722,20 @@ void WifiController::network_event_handler(void *arg, esp_event_base_t base, int
             auto *event = static_cast<ip_event_got_ip_t *>(event_data);
             uint8_t *spa = reinterpret_cast<uint8_t *>(&(event->ip_info.ip.addr));
             ESP_LOGI(TAG, "Obtained IP address: %u.%u.%u.%u", spa[0], spa[1], spa[2], spa[3]);
+            uint8_t *nma = reinterpret_cast<uint8_t *>(&(event->ip_info.netmask.addr));
+            uint32_t broadcast_addr = (event->ip_info.ip.addr & event->ip_info.netmask.addr) |
+                                      (~event->ip_info.netmask.addr);
+            uint8_t *bca = reinterpret_cast<uint8_t *>(&broadcast_addr);
+            ESP_LOGI(TAG,
+                     "STA netmask: %u.%u.%u.%u, derived broadcast: %u.%u.%u.%u",
+                     nma[0],
+                     nma[1],
+                     nma[2],
+                     nma[3],
+                     bca[0],
+                     bca[1],
+                     bca[2],
+                     bca[3]);
 
             fireWifiEvent(MYR_WIFI_EVENT_CONNECTED, nullptr);
 
