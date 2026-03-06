@@ -124,7 +124,7 @@ void test_processWifiCommand_connect_runs_in_expected_order(void)
     std::string ssid = "ssid-a";
     std::string pass = "pass-a";
 
-    TEST_ASSERT_EQUAL(ESP_OK, CommandParser::processWifiCommand('C', &ssid, &pass));
+    TEST_ASSERT_EQUAL(ESP_OK, CommandParser::processWifiCommand(WifiOpcode::Connect, &ssid, &pass));
     TEST_ASSERT_EQUAL_UINT32(1, gWifi.connect_calls);
     TEST_ASSERT_EQUAL_UINT32(1, gWifi.creds_calls);
     TEST_ASSERT_EQUAL_UINT32(1, gWifi.mode_calls);
@@ -135,7 +135,7 @@ void test_processWifiCommand_connect_runs_in_expected_order(void)
 
 void test_processWifiCommand_disconnect_fires_event_and_sets_ap_mode(void)
 {
-    TEST_ASSERT_EQUAL(ESP_OK, CommandParser::processWifiCommand('D', nullptr, nullptr));
+    TEST_ASSERT_EQUAL(ESP_OK, CommandParser::processWifiCommand(WifiOpcode::Disconnect, nullptr, nullptr));
     TEST_ASSERT_EQUAL_UINT32(1, gWifi.disconnect_calls);
     TEST_ASSERT_EQUAL_UINT32(1, gWifi.mode_calls);
     TEST_ASSERT_EQUAL_UINT16(MYR_WIFI_MODE_AP, gWifi.last_mode);
@@ -144,7 +144,7 @@ void test_processWifiCommand_disconnect_fires_event_and_sets_ap_mode(void)
 void test_processWifiCommand_change_password_requires_two_strings(void)
 {
     std::string old_pass = "old-pass";
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, CommandParser::processWifiCommand('O', &old_pass, nullptr));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, CommandParser::processWifiCommand(WifiOpcode::ChangeOtaPassword, &old_pass, nullptr));
     TEST_ASSERT_EQUAL_UINT32(0, gWifi.ota_pass_calls);
 }
 

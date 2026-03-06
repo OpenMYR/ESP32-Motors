@@ -68,7 +68,7 @@ public:
      * @param rhs Second command argument, typically passphrase or new OTA password.
      * @return `ESP_OK` on success, or an error describing the failed operation.
      */
-    static esp_err_t processWifiCommand(char opcode, const std::string *lhs, const std::string *rhs);
+    static esp_err_t processWifiCommand(WifiOpcode opcode, const std::string *lhs, const std::string *rhs);
 
     /**
      * @brief Replace Wi-Fi operation callbacks for tests.

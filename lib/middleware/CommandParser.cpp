@@ -63,7 +63,13 @@ void CommandParser::wifi_process_command(struct wifi_command_packet packet, ip4_
 
     std::string lhs = packet.ssid;
     std::string rhs = packet.password;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(processWifiCommand(packet.opcode, &lhs, &rhs));
+    WifiOpcode opcode = WifiOpcode::Connect;
+    if (!try_parse_wifi_opcode(packet.opcode, &opcode))
+    {
+        ESP_LOGW(TAG, "unsupported wifi opcode '%c'", packet.opcode);
+        return;
+    }
+    ESP_ERROR_CHECK_WITHOUT_ABORT(processWifiCommand(opcode, &lhs, &rhs));
 }
 
 esp_err_t CommandParser::processMotorOp(const Op &op)
@@ -87,11 +93,13 @@ esp_err_t CommandParser::processMotorOp(const Op &op)
     return ESP_FAIL;
 }
 
-esp_err_t CommandParser::processWifiCommand(char opcode, const std::string *lhs, const std::string *rhs)
+esp_err_t CommandParser::processWifiCommand(WifiOpcode opcode, const std::string *lhs, const std::string *rhs)
 {
     if (ota_active) return ESP_OK;
 
-    if (opcode == 'C')
+    switch (opcode)
+    {
+    case WifiOpcode::Connect:
     {
         if (lhs == nullptr || rhs == nullptr) return ESP_ERR_INVALID_ARG;
 
@@ -103,21 +111,16 @@ esp_err_t CommandParser::processWifiCommand(char opcode, const std::string *lhs,
 
         return wifiOps.setDefaultMode(MYR_WIFI_MODE_STATION);
     }
-
-    if (opcode == 'D')
-    {
+    case WifiOpcode::Disconnect:
         wifiOps.fireDisconnectEvent();
         return wifiOps.setDefaultMode(MYR_WIFI_MODE_AP);
-    }
-
-    if (opcode == 'O')
-    {
+    case WifiOpcode::ChangeOtaPassword:
         if (lhs == nullptr || rhs == nullptr) return ESP_ERR_INVALID_ARG;
         return wifiOps.changeOtaPass(lhs, rhs);
+    default:
+        ESP_LOGW(TAG, "unsupported wifi opcode '%c'", to_char(opcode));
+        return ESP_OK;
     }
-
-    ESP_LOGW(TAG, "unsupported wifi opcode '%c'", opcode);
-    return ESP_OK;
 }
 
 void CommandParser::setWifiOpsForTest(const WifiOps *ops)

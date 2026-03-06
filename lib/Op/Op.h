@@ -9,6 +9,120 @@ constexpr size_t kWifiCommandSsidLen = 32;
 constexpr size_t kWifiCommandPasswordLen = 63;
 constexpr size_t kWifiPacketLenBytes = 1 + kWifiCommandSsidLen + kWifiCommandPasswordLen;
 
+enum class WifiOpcode : char {
+    Connect = 'C',
+    Disconnect = 'D',
+    ChangeOtaPassword = 'O',
+};
+
+enum class MotorOpcode : char {
+    Move = 'M',
+    Stop = 'S',
+    Goto = 'G',
+    Sleep = 'I',
+    Microstep = 'U',
+    Reset = 'R',
+    Home = 'H',
+    Limit = 'L',
+    Abort = 'K',
+};
+
+inline constexpr char to_char(WifiOpcode opcode)
+{
+    return static_cast<char>(opcode);
+}
+
+inline constexpr char to_char(MotorOpcode opcode)
+{
+    return static_cast<char>(opcode);
+}
+
+inline constexpr bool try_parse_wifi_opcode(char raw, WifiOpcode *opcode)
+{
+    if (opcode == nullptr) return false;
+
+    switch (raw)
+    {
+    case to_char(WifiOpcode::Connect):
+        *opcode = WifiOpcode::Connect;
+        return true;
+    case to_char(WifiOpcode::Disconnect):
+        *opcode = WifiOpcode::Disconnect;
+        return true;
+    case to_char(WifiOpcode::ChangeOtaPassword):
+        *opcode = WifiOpcode::ChangeOtaPassword;
+        return true;
+    default:
+        return false;
+    }
+}
+
+inline constexpr bool try_parse_motor_opcode(char raw, MotorOpcode *opcode)
+{
+    if (opcode == nullptr) return false;
+
+    switch (raw)
+    {
+    case to_char(MotorOpcode::Move):
+        *opcode = MotorOpcode::Move;
+        return true;
+    case to_char(MotorOpcode::Stop):
+        *opcode = MotorOpcode::Stop;
+        return true;
+    case to_char(MotorOpcode::Goto):
+        *opcode = MotorOpcode::Goto;
+        return true;
+    case to_char(MotorOpcode::Sleep):
+        *opcode = MotorOpcode::Sleep;
+        return true;
+    case to_char(MotorOpcode::Microstep):
+        *opcode = MotorOpcode::Microstep;
+        return true;
+    case to_char(MotorOpcode::Reset):
+        *opcode = MotorOpcode::Reset;
+        return true;
+    case to_char(MotorOpcode::Home):
+        *opcode = MotorOpcode::Home;
+        return true;
+    case to_char(MotorOpcode::Limit):
+        *opcode = MotorOpcode::Limit;
+        return true;
+    case to_char(MotorOpcode::Abort):
+        *opcode = MotorOpcode::Abort;
+        return true;
+    default:
+        return false;
+    }
+}
+
+inline constexpr bool is_motion_opcode(MotorOpcode opcode)
+{
+    switch (opcode)
+    {
+    case MotorOpcode::Move:
+    case MotorOpcode::Stop:
+    case MotorOpcode::Goto:
+    case MotorOpcode::Sleep:
+        return true;
+    default:
+        return false;
+    }
+}
+
+inline constexpr bool is_motor_config_opcode(MotorOpcode opcode)
+{
+    switch (opcode)
+    {
+    case MotorOpcode::Microstep:
+    case MotorOpcode::Reset:
+    case MotorOpcode::Home:
+    case MotorOpcode::Limit:
+        return true;
+    default:
+        return false;
+    }
+}
+
 typedef struct Op {
     unsigned short port;
     char opcode;

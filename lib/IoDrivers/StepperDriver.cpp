@@ -214,9 +214,9 @@ uint64_t StepperDriver::planDwellDurationUs(int32_t waitCycles, uint16_t cycleRa
     return (static_cast<uint64_t>(cycles) * kMicrosecondsPerSecond) / static_cast<uint64_t>(cycleRateHz);
 }
 
-bool StepperDriver::shouldRejectForEndstop(char opcode, bool endstopTripped)
+bool StepperDriver::shouldRejectForEndstop(MotorOpcode opcode, bool endstopTripped)
 {
-    return endstopTripped && (opcode == 'M' || opcode == 'G');
+    return endstopTripped && (opcode == MotorOpcode::Move || opcode == MotorOpcode::Goto);
 }
 
 /**
@@ -279,7 +279,7 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
     }
     commandSeq[motorIndex].activeCommandSeq = acceptedCommandSeq;
 
-    if (shouldRejectForEndstop('G', isEndstopTripped(motorID)))
+    if (shouldRejectForEndstop(MotorOpcode::Goto, isEndstopTripped(motorID)))
     {
         return;
     }
@@ -356,7 +356,7 @@ void StepperDriver::motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID
     uint8_t motorIndex = 0;
     if (!tryResolveMotorIndex(motorID, motorsControlled, motorIndex)) return;
 
-    if (shouldRejectForEndstop('M', isEndstopTripped(motorID))) return;
+    if (shouldRejectForEndstop(MotorOpcode::Move, isEndstopTripped(motorID))) return;
 
     const int32_t currentStep = static_cast<int32_t>(currentAngle[motorIndex]);
     const int32_t goalStep = currentStep + deltaAngle;
@@ -386,7 +386,7 @@ void StepperDriver::motorStop(signed int wait_time, unsigned short precision, ui
     }
     commandSeq[motorIndex].activeCommandSeq = acceptedCommandSeq;
 
-    if (shouldRejectForEndstop('S', isEndstopTripped(motorID)))
+    if (shouldRejectForEndstop(MotorOpcode::Stop, isEndstopTripped(motorID)))
     {
         return;
     }
@@ -435,7 +435,7 @@ void StepperDriver::motorSleep(signed int wait_time, unsigned short precision, u
     }
     commandSeq[motorIndex].activeCommandSeq = acceptedCommandSeq;
 
-    if (shouldRejectForEndstop('I', isEndstopTripped(motorID)))
+    if (shouldRejectForEndstop(MotorOpcode::Sleep, isEndstopTripped(motorID)))
     {
         return;
     }

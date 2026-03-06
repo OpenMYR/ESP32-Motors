@@ -106,41 +106,42 @@ void CommandLayer::parseSubmittOp(uint8_t id, Op *op)
     (void)id;
     if (op == nullptr) return;
     CommandLayer::driver->setOpcodeContext(op->opSeq, op->motorID);
-    //log_i("Code: %d", (int)(op->opcode));
-    switch (op->opcode)
+    MotorOpcode opcode;
+    if (!try_parse_motor_opcode(op->opcode, &opcode)) return;
+
+    switch (opcode)
     {
-    case 'M':
+    case MotorOpcode::Move:
     {
         opcodeMove(op->stepNum, op->stepRate, op->motorID);
         break;
     }
-    case 'S':
+    case MotorOpcode::Stop:
     {
         opcodeStop(op->stepNum, op->stepRate, op->motorID);
         break;
     }
-    case 'G':
+    case MotorOpcode::Goto:
     {
         opcodeGoto(op->stepNum, op->stepRate, op->motorID);
         break;
     }
-    case 'I':
+    case MotorOpcode::Sleep:
     {
         opcodeSleep(op->stepNum, op->stepRate, op->motorID);
         break;
     }
-    case 'U':
+    case MotorOpcode::Microstep:
     {
         opcodeMotorSetting(MotorDriver::config_setting::MICROSTEPPING, op->stepRate, op->motorID, op->motorID);
         break;
     }
-    case 'K':
+    case MotorOpcode::Abort:
     {
         opcodeAbortCommand(op->motorID);
         break;
     }
     default:
-        //log_i("parseSubmittOp Unknown packet");
         break;
     }
 }
@@ -158,9 +159,10 @@ void CommandLayer::peekNextOp(uint8_t driverId)
         return;
     }
 
-    if (peekedOp->opcode == 'K')
-    {
-        CommandLayer::driver->setOpcodeContext(peekedOp->opSeq, driverId);
-        opcodeAbortCommand(driverId);
-    }
+    MotorOpcode opcode;
+    if (!try_parse_motor_opcode(peekedOp->opcode, &opcode)) return;
+    if (opcode != MotorOpcode::Abort) return;
+
+    CommandLayer::driver->setOpcodeContext(peekedOp->opSeq, driverId);
+    opcodeAbortCommand(driverId);
 }

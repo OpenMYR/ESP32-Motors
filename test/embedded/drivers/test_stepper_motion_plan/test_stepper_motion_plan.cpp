@@ -162,22 +162,22 @@ void test_plan_dwell_duration_matches_hz_example(void)
 
 void test_endstop_policy_blocks_motion_commands_when_tripped(void)
 {
-    TEST_ASSERT_TRUE(StepperDriver::shouldRejectForEndstop('M', true));
-    TEST_ASSERT_TRUE(StepperDriver::shouldRejectForEndstop('G', true));
+    TEST_ASSERT_TRUE(StepperDriver::shouldRejectForEndstop(MotorOpcode::Move, true));
+    TEST_ASSERT_TRUE(StepperDriver::shouldRejectForEndstop(MotorOpcode::Goto, true));
 }
 
 void test_endstop_policy_allows_dwell_commands_when_tripped(void)
 {
-    TEST_ASSERT_FALSE(StepperDriver::shouldRejectForEndstop('S', true));
-    TEST_ASSERT_FALSE(StepperDriver::shouldRejectForEndstop('I', true));
+    TEST_ASSERT_FALSE(StepperDriver::shouldRejectForEndstop(MotorOpcode::Stop, true));
+    TEST_ASSERT_FALSE(StepperDriver::shouldRejectForEndstop(MotorOpcode::Sleep, true));
 }
 
 void test_endstop_policy_allows_commands_when_not_tripped(void)
 {
-    TEST_ASSERT_FALSE(StepperDriver::shouldRejectForEndstop('M', false));
-    TEST_ASSERT_FALSE(StepperDriver::shouldRejectForEndstop('G', false));
-    TEST_ASSERT_FALSE(StepperDriver::shouldRejectForEndstop('S', false));
-    TEST_ASSERT_FALSE(StepperDriver::shouldRejectForEndstop('I', false));
+    TEST_ASSERT_FALSE(StepperDriver::shouldRejectForEndstop(MotorOpcode::Move, false));
+    TEST_ASSERT_FALSE(StepperDriver::shouldRejectForEndstop(MotorOpcode::Goto, false));
+    TEST_ASSERT_FALSE(StepperDriver::shouldRejectForEndstop(MotorOpcode::Stop, false));
+    TEST_ASSERT_FALSE(StepperDriver::shouldRejectForEndstop(MotorOpcode::Sleep, false));
 }
 
 void test_endstop_mapping_only_motor_one_exposes_stepper_endstops(void)

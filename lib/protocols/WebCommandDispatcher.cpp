@@ -27,21 +27,25 @@ esp_err_t parse_config_pair(cJSON *data, std::string *lhs, std::string *rhs)
     return ESP_OK;
 }
 
-esp_err_t handle_config_command(char code, cJSON *data)
+esp_err_t handle_config_command(WifiOpcode opcode, cJSON *data)
 {
-    if (code == 'D') return CommandParser::processWifiCommand(code, nullptr, nullptr);
+    if (opcode == WifiOpcode::Disconnect) return CommandParser::processWifiCommand(opcode, nullptr, nullptr);
 
-    if (code == 'C' || code == 'O')
+    switch (opcode)
+    {
+    case WifiOpcode::Connect:
+    case WifiOpcode::ChangeOtaPassword:
     {
         std::string lhs;
         std::string rhs;
         esp_err_t err = parse_config_pair(data, &lhs, &rhs);
         if (err != ESP_OK) return err;
-        return CommandParser::processWifiCommand(code, &lhs, &rhs);
+        return CommandParser::processWifiCommand(opcode, &lhs, &rhs);
     }
-
-    ESP_LOGD(TAG, "POST command '%c' ignored in IDF baseline", code);
-    return ESP_OK;
+    default:
+        ESP_LOGD(TAG, "POST command '%c' ignored in IDF baseline", to_char(opcode));
+        return ESP_OK;
+    }
 }
 
 esp_err_t parse_motor_data(cJSON *data, Op *op)
@@ -66,24 +70,24 @@ esp_err_t parse_motor_data(cJSON *data, Op *op)
     return ESP_OK;
 }
 
-esp_err_t handle_motor_motion_command(char code, cJSON *data)
+esp_err_t handle_motor_motion_command(MotorOpcode opcode, cJSON *data)
 {
     Op op = {};
     esp_err_t err = parse_motor_data(data, &op);
     if (err != ESP_OK) return err;
     if (op.stepRate == 0) return ESP_ERR_INVALID_ARG;
 
-    op.opcode = code;
+    op.opcode = to_char(opcode);
     return CommandParser::processMotorOp(op);
 }
 
-esp_err_t handle_motor_config_command(char code, cJSON *data)
+esp_err_t handle_motor_config_command(MotorOpcode opcode, cJSON *data)
 {
     Op op = {};
     esp_err_t err = parse_motor_data(data, &op);
     if (err != ESP_OK) return err;
 
-    op.opcode = code;
+    op.opcode = to_char(opcode);
     return CommandParser::processMotorOp(op);
 }
 } // namespace
@@ -119,22 +123,24 @@ esp_err_t processPayload(const char *payload)
             break;
         }
 
-        const char opcode = code->valuestring[0];
-        if (opcode == 'C' || opcode == 'D' || opcode == 'O')
+        const char rawOpcode = code->valuestring[0];
+        WifiOpcode wifiOpcode = WifiOpcode::Connect;
+        MotorOpcode motorOpcode = MotorOpcode::Move;
+        if (try_parse_wifi_opcode(rawOpcode, &wifiOpcode))
         {
-            err = handle_config_command(opcode, data);
+            err = handle_config_command(wifiOpcode, data);
         }
-        else if (opcode == 'M' || opcode == 'S' || opcode == 'G' || opcode == 'I')
+        else if (try_parse_motor_opcode(rawOpcode, &motorOpcode) && is_motion_opcode(motorOpcode))
         {
-            err = handle_motor_motion_command(opcode, data);
+            err = handle_motor_motion_command(motorOpcode, data);
         }
-        else if (opcode == 'U' || opcode == 'R' || opcode == 'H' || opcode == 'L')
+        else if (try_parse_motor_opcode(rawOpcode, &motorOpcode) && is_motor_config_opcode(motorOpcode))
         {
-            err = handle_motor_config_command(opcode, data);
+            err = handle_motor_config_command(motorOpcode, data);
         }
         else
         {
-            ESP_LOGD(TAG, "POST command '%c' ignored", opcode);
+            ESP_LOGD(TAG, "POST command '%c' ignored", rawOpcode);
             err = ESP_OK;
         }
         if (err != ESP_OK) break;

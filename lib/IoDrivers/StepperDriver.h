@@ -30,7 +30,7 @@ public:
     static MotionPlan planRelativeMove(int32_t currentStep, int32_t deltaStep, uint16_t stepRate);
     static MotionPlan planAbsoluteMove(int32_t currentStep, int32_t targetStep, uint16_t stepRate);
     static uint64_t planDwellDurationUs(int32_t waitCycles, uint16_t cycleRateHz);
-    static bool shouldRejectForEndstop(char opcode, bool endstopTripped);
+    static bool shouldRejectForEndstop(MotorOpcode opcode, bool endstopTripped);
     static bool isCommandSequenceStale(uint32_t seq, uint32_t watermark);
     static int8_t findActiveRunOwner(uint32_t runSeq, const uint32_t *activeRunSeqs, uint8_t motorCount);
     static int32_t computeRunEndStep(int32_t startStep, bool directionForward, uint32_t pulsesCompleted);
