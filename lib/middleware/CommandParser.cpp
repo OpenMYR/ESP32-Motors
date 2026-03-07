@@ -10,6 +10,7 @@
 
 namespace {
 const char *TAG = "CommandParser";
+constexpr uint16_t kMaxMotorCount = 16;
 
 esp_err_t wifi_try_connect(const std::string *ssid, const std::string *pass)
 {
@@ -140,8 +141,7 @@ void CommandParser::register_udp_ack_func(std::function<void(command_response_pa
 
 void CommandParser::stop_all_motors()
 {
-    uint16_t maxMotorCount = 16;
-    for (int id = 0; id < maxMotorCount; id++)
+    for (uint16_t id = 0; id < kMaxMotorCount; id++)
     {
         buffer->clear(id);
         buffer->killCurrentOp(id);

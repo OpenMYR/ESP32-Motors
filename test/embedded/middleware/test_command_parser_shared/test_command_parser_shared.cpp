@@ -198,6 +198,10 @@ void test_exit_ota_mode_reenables_command_processing(void)
     CommandParser::enter_ota_mode();
     TEST_ASSERT_TRUE(CommandParser::ota_active);
 
+    Op *queued_kill = next_op(4);
+    TEST_ASSERT_NOT_NULL(queued_kill);
+    TEST_ASSERT_EQUAL_CHAR('K', queued_kill->opcode);
+
     CommandParser::exit_ota_mode();
     TEST_ASSERT_FALSE(CommandParser::ota_active);
 
