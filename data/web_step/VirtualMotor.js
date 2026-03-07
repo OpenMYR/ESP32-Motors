@@ -4,6 +4,7 @@ class VirtualMotor {
 		this.transmitInterval = args.transmitInterval;
 		this.motorPositions = args.motorPositions.slice();
 		this.oldMotorPositions = args.motorPositions.slice();
+		this.pendingCommands = [];
 		this.changed = false;
 		this.send();
 		this.launchLoop();
@@ -23,6 +24,12 @@ class VirtualMotor {
 		this.tryUpdate();
 	}
 
+	queueCommand(command) {
+		this.pendingCommands.push(command);
+		this.changed = true;
+		this.tryUpdate();
+	}
+
 	tryUpdate() {
 		if (this.changed) {
 			if (Date.now() >= this.lastTransmition + this.transmitInterval) {
@@ -33,7 +40,8 @@ class VirtualMotor {
 	}
 
 	send() {
-		let commands = [];
+		let commands = this.pendingCommands.slice();
+		this.pendingCommands = [];
 		for (let i = 0; i < this.motorPositions.length; i++) {
 			if(this.motorPositions[i] != this.oldMotorPositions[i]) {
 				commands.push({

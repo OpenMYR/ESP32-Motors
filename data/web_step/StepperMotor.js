@@ -25,7 +25,7 @@ class StepperMotor {
 	}
 
 	_mousePressed(event) {
-		StepperMotor.setMicroStepping(true);
+		this.queueMicroStepping(true);
 		this._mousedown = true; 
 		this._mouseMoved(event);
 	}
@@ -51,9 +51,21 @@ class StepperMotor {
 	}
 
 	_touchStart(event) {
-		StepperMotor.setMicroStepping(true);
+		this.queueMicroStepping(true);
 		this._touchdown = true;
 		this._touchMoved(event);
+	}
+
+	queueMicroStepping(flag) {
+		this.virtualMotor.queueCommand({
+			code : "U",
+			data : [
+				this.motorArgs.motorid,
+				0,
+				0,
+				flag ? 1 : 0,
+			]
+		});
 	}
 
 	_touchMoved(event) {
@@ -171,21 +183,4 @@ class StepperMotor {
 		ctx.restore();
 	}
 
-	static setMicroStepping(flag) {
-	let out = {
-		commands : [{
-			code : "U",
-			data : [
-				motor1.motorid,
-				0,
-				0,
-				flag ? 1 : 0,
-			]
-		}]
-	};
-	let httpRequest = new XMLHttpRequest();
-	httpRequest.open("POST", "/", true);
-	httpRequest.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-	httpRequest.send(JSON.stringify(out));
-}
 }
