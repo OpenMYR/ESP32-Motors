@@ -241,7 +241,7 @@ void BrushedMotorDriver::isrStartIoDriver()
         "motorloopbdc",
         2000,
         (void *)1,
-        0,
+        MotorDriver::kMotorLoopTaskPriority,
         &motorTaskDriver,
         CORE_1);
 }

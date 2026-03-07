@@ -43,7 +43,6 @@ const char *TAG = "ServoDriver";
 uint8_t sPeekTicks = 5;
 uint8_t sPeekRate = 5;
 constexpr uint32_t kMotorLoopStackWords = 4096;
-constexpr UBaseType_t kMotorLoopPriority = 1;
 
 bool resolve_motor_index(uint8_t motorID, uint8_t *motorIndex)
 {
@@ -305,7 +304,7 @@ void ServoDriver::isrStartIoDriver()
         "motorloop",
         kMotorLoopStackWords,
         (void *)1,
-        kMotorLoopPriority,
+        MotorDriver::kMotorLoopTaskPriority,
         &motorTaskDriver,
         CORE_1);
     if (ok != pdPASS)

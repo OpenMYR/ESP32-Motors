@@ -37,7 +37,6 @@ constexpr uint32_t kCommandTimingMarginUs = 100;
 constexpr uint64_t kMicrosecondsPerSecond = 1000000ULL;
 constexpr uint64_t kCommandTimeoutMinGraceUs = 50000ULL;
 constexpr uint64_t kCommandTimeoutGraceDivisor = 4ULL;
-constexpr UBaseType_t kMotorTaskPriority = 5;
 constexpr BaseType_t kMotorTaskCore = 1;
 constexpr bool kPulseInitOnDriverCore = true;
 
@@ -508,7 +507,7 @@ void StepperDriver::isrStartIoDriver()
         "motorloopstep",
         MOTOR_LOOP_STACK_BYTES,
         (void *)1,
-        kMotorTaskPriority,
+        MotorDriver::kMotorLoopTaskPriority,
         &motorTaskDriver,
         kMotorTaskCore);
 }

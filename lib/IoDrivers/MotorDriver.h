@@ -17,6 +17,8 @@
 class MotorDriver
 {
     public:
+        static constexpr UBaseType_t kMotorLoopTaskPriority = 5;
+
         MotorDriver()
         {
         };
