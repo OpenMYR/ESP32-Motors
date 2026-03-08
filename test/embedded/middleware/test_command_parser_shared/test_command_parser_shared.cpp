@@ -1,4 +1,5 @@
 #include <string>
+#include <cstring>
 
 #include <unity.h>
 
@@ -148,13 +149,15 @@ void test_processWifiCommand_change_password_requires_two_strings(void)
     TEST_ASSERT_EQUAL_UINT32(0, gWifi.ota_pass_calls);
 }
 
-void test_wifi_process_command_full_width_ssid_does_not_read_into_password_buffer(void)
+void test_wifi_process_command_accepts_max_length_fields_without_null_terminator(void)
 {
     wifi_command_packet packet = {};
-    packet.opcode = to_char(WifiOpcode::Connect);
-    memset(packet.ssid, 'S', sizeof(packet.ssid));
-    packet.password[0] = 'P';
-    packet.password[1] = '\0';
+    packet.opcode = 'C';
+    memset(packet.ssid, 's', sizeof(packet.ssid));
+    memset(packet.password, 'p', sizeof(packet.password));
+    const std::string expected_ssid(sizeof(packet.ssid), 's');
+    const std::string expected_pass(sizeof(packet.password), 'p');
+>>>>>>> d68c273 (accept stop and sleep with zero rate)
 
     ip4_addr_t addr = {};
     CommandParser::wifi_process_command(packet, addr);
@@ -162,9 +165,52 @@ void test_wifi_process_command_full_width_ssid_does_not_read_into_password_buffe
     TEST_ASSERT_EQUAL_UINT32(1, gWifi.connect_calls);
     TEST_ASSERT_EQUAL_UINT32(1, gWifi.creds_calls);
     TEST_ASSERT_EQUAL_UINT32(1, gWifi.mode_calls);
-    TEST_ASSERT_EQUAL_UINT32(sizeof(packet.ssid), gWifi.last_ssid.size());
-    TEST_ASSERT_EQUAL_STRING_LEN(packet.ssid, gWifi.last_ssid.c_str(), sizeof(packet.ssid));
-    TEST_ASSERT_EQUAL_STRING("P", gWifi.last_pass.c_str());
+    TEST_ASSERT_EQUAL_STRING_LEN(expected_ssid.c_str(), gWifi.last_ssid.c_str(), expected_ssid.size());
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(expected_ssid.size()), static_cast<int>(gWifi.last_ssid.size()));
+    TEST_ASSERT_EQUAL_STRING_LEN(expected_pass.c_str(), gWifi.last_pass.c_str(), expected_pass.size());
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(expected_pass.size()), static_cast<int>(gWifi.last_pass.size()));
+}
+
+void test_wifi_process_command_truncates_at_first_null_in_fixed_fields(void)
+{
+    wifi_command_packet packet = {};
+    packet.opcode = 'C';
+    memset(packet.ssid, 'x', sizeof(packet.ssid));
+    memset(packet.password, 'y', sizeof(packet.password));
+    memcpy(packet.ssid, "ssid", 4);
+    packet.ssid[4] = '\0';
+    memcpy(packet.password, "pass", 4);
+    packet.password[4] = '\0';
+
+    ip4_addr_t addr = {};
+    CommandParser::wifi_process_command(packet, addr);
+
+    TEST_ASSERT_EQUAL_UINT32(1, gWifi.connect_calls);
+    TEST_ASSERT_EQUAL_UINT32(1, gWifi.creds_calls);
+    TEST_ASSERT_EQUAL_UINT32(1, gWifi.mode_calls);
+    TEST_ASSERT_EQUAL_STRING("ssid", gWifi.last_ssid.c_str());
+    TEST_ASSERT_EQUAL_INT(4, static_cast<int>(gWifi.last_ssid.size()));
+    TEST_ASSERT_EQUAL_STRING("pass", gWifi.last_pass.c_str());
+    TEST_ASSERT_EQUAL_INT(4, static_cast<int>(gWifi.last_pass.size()));
+}
+
+void test_wifi_process_command_ssid_without_null_stays_within_ssid_field(void)
+{
+    wifi_command_packet packet = {};
+    packet.opcode = 'C';
+    memset(packet.ssid, 's', sizeof(packet.ssid));
+    memset(packet.password, 'q', sizeof(packet.password));
+    packet.password[3] = '\0';
+    const std::string expected_ssid(sizeof(packet.ssid), 's');
+
+    ip4_addr_t addr = {};
+    CommandParser::wifi_process_command(packet, addr);
+
+    TEST_ASSERT_EQUAL_UINT32(1, gWifi.connect_calls);
+    TEST_ASSERT_EQUAL_UINT32(1, gWifi.creds_calls);
+    TEST_ASSERT_EQUAL_UINT32(1, gWifi.mode_calls);
+    TEST_ASSERT_EQUAL_STRING_LEN(expected_ssid.c_str(), gWifi.last_ssid.c_str(), expected_ssid.size());
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(expected_ssid.size()), static_cast<int>(gWifi.last_ssid.size()));
 }
 
 void test_stop_all_motors_clears_and_kills_without_entering_ota_mode(void)
@@ -244,7 +290,9 @@ extern "C" void app_main(void)
     RUN_TEST(test_processWifiCommand_connect_runs_in_expected_order);
     RUN_TEST(test_processWifiCommand_disconnect_fires_event_and_sets_ap_mode);
     RUN_TEST(test_processWifiCommand_change_password_requires_two_strings);
-    RUN_TEST(test_wifi_process_command_full_width_ssid_does_not_read_into_password_buffer);
+    RUN_TEST(test_wifi_process_command_accepts_max_length_fields_without_null_terminator);
+    RUN_TEST(test_wifi_process_command_truncates_at_first_null_in_fixed_fields);
+    RUN_TEST(test_wifi_process_command_ssid_without_null_stays_within_ssid_field);
     RUN_TEST(test_stop_all_motors_clears_and_kills_without_entering_ota_mode);
     RUN_TEST(test_enter_ota_mode_stops_motors_and_blocks_future_commands);
     RUN_TEST(test_exit_ota_mode_reenables_command_processing);

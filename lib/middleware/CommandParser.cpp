@@ -46,6 +46,13 @@ const CommandParser::WifiOps kDefaultWifiOps = {
     wifi_change_ota_pass,
 };
 
+template <size_t N>
+std::string bounded_cstr_field_to_string(const char (&field)[N])
+{
+    const size_t len = strnlen(field, N);
+    return std::string(field, len);
+}
+
 OpBuffer *buffer = OpBuffer::getInstance();
 } // namespace
 
@@ -63,9 +70,8 @@ void CommandParser::wifi_process_command(struct wifi_command_packet packet, ip4_
 {
     (void)addr;
 
-    // UDP Wi-Fi packets carry fixed-width fields that may not be null-terminated.
-    const std::string lhs(packet.ssid, strnlen(packet.ssid, sizeof(packet.ssid)));
-    const std::string rhs(packet.password, strnlen(packet.password, sizeof(packet.password)));
+    std::string lhs = bounded_cstr_field_to_string(packet.ssid);
+    std::string rhs = bounded_cstr_field_to_string(packet.password);
     WifiOpcode opcode = WifiOpcode::Connect;
     if (!try_parse_wifi_opcode(packet.opcode, &opcode))
     {

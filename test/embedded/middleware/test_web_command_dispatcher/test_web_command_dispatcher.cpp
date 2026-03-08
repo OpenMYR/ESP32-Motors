@@ -140,6 +140,31 @@ void test_processPayload_accepts_motor_config_opcodes(void)
     TEST_ASSERT_EQUAL_UINT16(1200, limits_op->stepRate);
 }
 
+void test_processPayload_accepts_stop_and_sleep_with_zero_precision(void)
+{
+    const char *payload = R"({"commands":[{"code":"S","data":[4,1,50,0]},{"code":"I","data":[4,1,70,0]}]})";
+    TEST_ASSERT_EQUAL(ESP_OK, WebCommandDispatcher::processPayload(payload));
+
+    Op *stop_op = next_op(4);
+    TEST_ASSERT_NOT_NULL(stop_op);
+    TEST_ASSERT_EQUAL_CHAR('S', stop_op->opcode);
+    TEST_ASSERT_EQUAL_INT32(50, stop_op->stepNum);
+    TEST_ASSERT_EQUAL_UINT16(0, stop_op->stepRate);
+
+    Op *sleep_op = next_op(4);
+    TEST_ASSERT_NOT_NULL(sleep_op);
+    TEST_ASSERT_EQUAL_CHAR('I', sleep_op->opcode);
+    TEST_ASSERT_EQUAL_INT32(70, sleep_op->stepNum);
+    TEST_ASSERT_EQUAL_UINT16(0, sleep_op->stepRate);
+}
+
+void test_processPayload_rejects_move_with_zero_rate(void)
+{
+    const char *payload = R"({"commands":[{"code":"M","data":[2,1,-90,0]}]})";
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, WebCommandDispatcher::processPayload(payload));
+    TEST_ASSERT_TRUE(OpBuffer::getInstance()->isEmpty(2));
+}
+
 void test_processPayload_rejects_invalid_code_shape(void)
 {
     const char *payload = R"({"commands":[{"code":"MM","data":[2,1,-90,300]}]})";
@@ -235,6 +260,8 @@ extern "C" void app_main(void)
     RUN_TEST(test_processPayload_enqueues_motion_opcode);
     RUN_TEST(test_processPayload_queue_zero_kills_then_enqueues_new_command);
     RUN_TEST(test_processPayload_accepts_motor_config_opcodes);
+    RUN_TEST(test_processPayload_accepts_stop_and_sleep_with_zero_precision);
+    RUN_TEST(test_processPayload_rejects_move_with_zero_rate);
     RUN_TEST(test_processPayload_rejects_invalid_code_shape);
     RUN_TEST(test_processPayload_rejects_invalid_data_shape);
     RUN_TEST(test_processPayload_rejects_motion_opcode_with_zero_step_rate);
