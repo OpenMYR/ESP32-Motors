@@ -172,6 +172,7 @@ esp_err_t post_ota_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
+    // TODO(OTA-FILESYSTEM): Add a LittleFS OTA path so firmware and filesystem updates both work over WiFi.
     CommandParser::enter_ota_mode();
 
     const esp_partition_t *update_partition = esp_ota_get_next_update_partition(nullptr);
