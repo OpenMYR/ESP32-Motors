@@ -65,6 +65,18 @@ void test_servo_motorMove() {
     }         
 }
 
+void test_servo_motorMove_negative_delta_finishes_after_expected_duration() {
+    ServoDriver *driver = ServoDriver::getInstance();
+
+    driver->abortCommand(1);
+    driver->motorMove(-10, 100, 1);
+    TEST_ASSERT_EQUAL(true, driver->isMotorRunning(1));
+
+    vTaskDelay(pdMS_TO_TICKS(250));
+
+    TEST_ASSERT_EQUAL(false, driver->isMotorRunning(1));
+}
+
 void test_servo_motorStop() {
     for (size_t i = 1; i <= MAX_MOTORS; i++)
     {
@@ -101,6 +113,7 @@ extern "C" void app_main(void)
     RUN_TEST(test_servo_inactive_on_init);
     RUN_TEST(test_servo_motorGoTo);
     RUN_TEST(test_servo_motorMove);
+    RUN_TEST(test_servo_motorMove_negative_delta_finishes_after_expected_duration);
     RUN_TEST(test_servo_motorStop);
     RUN_TEST(test_servo_motorSleep);
     RUN_TEST(test_servo_abortCommand);

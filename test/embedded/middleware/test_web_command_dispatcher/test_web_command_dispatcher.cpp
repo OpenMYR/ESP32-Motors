@@ -154,6 +154,13 @@ void test_processPayload_rejects_invalid_data_shape(void)
     TEST_ASSERT_TRUE(OpBuffer::getInstance()->isEmpty(2));
 }
 
+void test_processPayload_rejects_motion_opcode_with_zero_step_rate(void)
+{
+    const char *payload = R"({"commands":[{"code":"M","data":[2,1,-90,0]}]})";
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, WebCommandDispatcher::processPayload(payload));
+    TEST_ASSERT_TRUE(OpBuffer::getInstance()->isEmpty(2));
+}
+
 void test_processPayload_ignores_unknown_opcode_and_keeps_processing(void)
 {
     const char *payload = R"({"commands":[{"code":"Z","data":[0]},{"code":"S","data":[4,1,50,1]}]})";
@@ -230,6 +237,7 @@ extern "C" void app_main(void)
     RUN_TEST(test_processPayload_accepts_motor_config_opcodes);
     RUN_TEST(test_processPayload_rejects_invalid_code_shape);
     RUN_TEST(test_processPayload_rejects_invalid_data_shape);
+    RUN_TEST(test_processPayload_rejects_motion_opcode_with_zero_step_rate);
     RUN_TEST(test_processPayload_ignores_unknown_opcode_and_keeps_processing);
     RUN_TEST(test_processPayload_config_C_returns_connect_error_without_followup_calls);
     RUN_TEST(test_processPayload_config_C_returns_credentials_error);

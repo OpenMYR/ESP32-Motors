@@ -1,5 +1,6 @@
 #include "config/Config.h"
 
+#include <cstring>
 #include <esp_log.h>
 #include <string>
 
@@ -62,8 +63,9 @@ void CommandParser::wifi_process_command(struct wifi_command_packet packet, ip4_
 {
     (void)addr;
 
-    std::string lhs = packet.ssid;
-    std::string rhs = packet.password;
+    // UDP Wi-Fi packets carry fixed-width fields that may not be null-terminated.
+    const std::string lhs(packet.ssid, strnlen(packet.ssid, sizeof(packet.ssid)));
+    const std::string rhs(packet.password, strnlen(packet.password, sizeof(packet.password)));
     WifiOpcode opcode = WifiOpcode::Connect;
     if (!try_parse_wifi_opcode(packet.opcode, &opcode))
     {

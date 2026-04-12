@@ -148,6 +148,25 @@ void test_processWifiCommand_change_password_requires_two_strings(void)
     TEST_ASSERT_EQUAL_UINT32(0, gWifi.ota_pass_calls);
 }
 
+void test_wifi_process_command_full_width_ssid_does_not_read_into_password_buffer(void)
+{
+    wifi_command_packet packet = {};
+    packet.opcode = to_char(WifiOpcode::Connect);
+    memset(packet.ssid, 'S', sizeof(packet.ssid));
+    packet.password[0] = 'P';
+    packet.password[1] = '\0';
+
+    ip4_addr_t addr = {};
+    CommandParser::wifi_process_command(packet, addr);
+
+    TEST_ASSERT_EQUAL_UINT32(1, gWifi.connect_calls);
+    TEST_ASSERT_EQUAL_UINT32(1, gWifi.creds_calls);
+    TEST_ASSERT_EQUAL_UINT32(1, gWifi.mode_calls);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(packet.ssid), gWifi.last_ssid.size());
+    TEST_ASSERT_EQUAL_STRING_LEN(packet.ssid, gWifi.last_ssid.c_str(), sizeof(packet.ssid));
+    TEST_ASSERT_EQUAL_STRING("P", gWifi.last_pass.c_str());
+}
+
 void test_stop_all_motors_clears_and_kills_without_entering_ota_mode(void)
 {
     Op queued = {};
@@ -225,6 +244,7 @@ extern "C" void app_main(void)
     RUN_TEST(test_processWifiCommand_connect_runs_in_expected_order);
     RUN_TEST(test_processWifiCommand_disconnect_fires_event_and_sets_ap_mode);
     RUN_TEST(test_processWifiCommand_change_password_requires_two_strings);
+    RUN_TEST(test_wifi_process_command_full_width_ssid_does_not_read_into_password_buffer);
     RUN_TEST(test_stop_all_motors_clears_and_kills_without_entering_ota_mode);
     RUN_TEST(test_enter_ota_mode_stops_motors_and_blocks_future_commands);
     RUN_TEST(test_exit_ota_mode_reenables_command_processing);

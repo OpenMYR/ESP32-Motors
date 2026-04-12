@@ -219,9 +219,9 @@ void ServoDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorID)
     motorDwell[motorIndex] = false;
     motorSleeping[motorIndex] = false;
     startAngle[motorIndex] = currentAngle[motorIndex];
-    commandDeltaAngle[motorIndex] = targetAngle - currentAngle[motorIndex];
+    commandDeltaAngle[motorIndex] = targetAngle;
     startTime[motorIndex] = esp_timer_get_time();
-    commandDeltaTime[motorIndex] = (uint64_t)commandDeltaAngle[motorIndex] * rate * 1000000;
+    commandDeltaTime[motorIndex] = (1000000ULL * static_cast<uint64_t>(abs(commandDeltaAngle[motorIndex]))) / rate;
 
     commandDone[motorIndex] = false;
     ESP_LOGV(TAG, "command %d %d %llu %llu ", startAngle[motorIndex], commandDeltaAngle[motorIndex],
