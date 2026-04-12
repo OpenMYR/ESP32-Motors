@@ -157,7 +157,6 @@ void test_wifi_process_command_accepts_max_length_fields_without_null_terminator
     memset(packet.password, 'p', sizeof(packet.password));
     const std::string expected_ssid(sizeof(packet.ssid), 's');
     const std::string expected_pass(sizeof(packet.password), 'p');
->>>>>>> d68c273 (accept stop and sleep with zero rate)
 
     ip4_addr_t addr = {};
     CommandParser::wifi_process_command(packet, addr);
