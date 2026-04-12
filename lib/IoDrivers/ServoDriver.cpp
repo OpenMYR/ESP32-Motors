@@ -462,15 +462,16 @@ void ServoDriver::changeMotorSettings(config_setting setting, uint32_t data1, ui
     if (!resolve_motor_index(motorID, &motorIndex)) return;
 
     commandDone[motorIndex] = false;
-    if (data2 < MAX_MOTORS)
+    uint8_t configMotorIndex = 0;
+    if (resolve_motor_index(static_cast<uint8_t>(data2), &configMotorIndex))
     {
         if (setting == MAX_SERVO_BOUND)
         {
-            confs[data2].max = std::min(data1, (uint32_t)200);
+            confs[configMotorIndex].max = std::min(data1, (uint32_t)200);
         }
         else if (setting == MIN_SERVO_BOUND)
         {
-            confs[data2].min = data1;
+            confs[configMotorIndex].min = data1;
         }
     }
 
