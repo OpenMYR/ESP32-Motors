@@ -43,36 +43,36 @@ public:
      * @param motor_id One-based motor index.
      * @return True when the motor is active.
      */
-    bool isMotorRunning(uint8_t motorID);
+    bool isMotorRunning(uint8_t motorID) override;
 
     /** @brief Launch the stepper driver task on CORE_1. */
-    void isrStartIoDriver();
+    void isrStartIoDriver() override;
 
     /** @brief Stop the stepper task and disable the driver. */
-    void isrStopIoDriver();
+    void isrStopIoDriver() override;
 
     /**
      * @brief Move a motor to an absolute target position.
      */
-    void motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID);
+    void motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID) override;
 
     /**
      * @brief Move a motor by a relative delta.
      */
-    void motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID);
+    void motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID) override;
 
     /**
      * @brief Pause the motor for the provided wait cycles.
      */
-    void motorStop(signed int wait_time, unsigned short precision, uint8_t motorID);
+    void motorStop(signed int wait_time, unsigned short precision, uint8_t motorID) override;
 
     /**
      * @brief Put the motor to sleep for the wait duration.
      */
-    void motorSleep(signed int wait_time, unsigned short precision, uint8_t motorID);
+    void motorSleep(signed int wait_time, unsigned short precision, uint8_t motorID) override;
 
     /** @brief Cancel the current motor command immediately. */
-    void abortCommand(uint8_t motorID);
+    void abortCommand(uint8_t motorID) override;
     void setOpcodeContext(uint32_t op_seq, uint8_t motor_id) override;
 
     /** @brief Return the singleton instance. */
@@ -81,7 +81,7 @@ public:
     /**
      * @brief Update driver configuration for a specific motor.
      */
-    void changeMotorSettings(MotorDriver::config_setting setting, uint32_t data1, uint32_t data2, uint8_t motorID);
+    void changeMotorSettings(MotorDriver::config_setting setting, uint32_t data1, uint32_t data2, uint8_t motorID) override;
 
     /** @brief Query whether motor-specific endstop input is active. */
     bool IRAM_ATTR isEndstopTripped(uint8_t motor_id) override;
@@ -110,10 +110,10 @@ public:
 
 
 private:
-    void initMotorGpio();
+    void initMotorGpio() override;
 
     static void IRAM_ATTR isrIoStep(void *);
-    void driver();
+    void driver() override;
 
     static void IRAM_ATTR onPulseRunComplete(uint32_t pulsesCompleted, uint32_t runToken, void *userCtx);
     void applyPulseProgress(uint8_t motorIndex, uint32_t pulsesCompleted);
@@ -184,8 +184,8 @@ private:
     uint64_t degreesToSteps(double);
 
     bool isValidOpCode(Op *);
-    void getNextOpForDriver(uint8_t id);
-    void peekOpForDriver(uint8_t id);
+    void getNextOpForDriver(uint8_t id) override;
+    void peekOpForDriver(uint8_t id) override;
     int motorsControlled;
 };
 

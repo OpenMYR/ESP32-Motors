@@ -33,19 +33,19 @@ class MotorDriver
         /**
          * @brief Start the background IO driver task.
          */
-        virtual void isrStartIoDriver() {}
+        virtual void isrStartIoDriver() = 0;
 
         /**
          * @brief Stop the IO driver and release resources.
          */
-        virtual void isrStopIoDriver() {}
+        virtual void isrStopIoDriver() = 0;
 
         /**
          * @brief Report whether a motor currently has a command.
          * @param motor_id One-based motor identifier.
          * @return True if the motor is busy.
          */
-        virtual bool isMotorRunning(uint8_t motor_id) { return false; }
+        virtual bool isMotorRunning(uint8_t motor_id) = 0;
 
         /**
          * @brief Update implementation-specific configuration.
@@ -54,7 +54,7 @@ class MotorDriver
          * @param data2 Secondary configuration value.
          * @param motor_id One-based motor identifier.
          */
-        virtual void changeMotorSettings(config_setting setting, uint32_t data1, uint32_t data2, uint8_t motor_id) {}
+        virtual void changeMotorSettings(config_setting setting, uint32_t data1, uint32_t data2, uint8_t motor_id) = 0;
 
         /**
          * @brief Command an absolute position target.
@@ -62,7 +62,7 @@ class MotorDriver
          * @param rate Rate used for timing.
          * @param motorID One-based motor identifier.
          */
-        virtual void motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID) {}
+        virtual void motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID) = 0;
 
         /**
          * @brief Command a delta movement relative to the current position.
@@ -70,7 +70,7 @@ class MotorDriver
          * @param rate Rate used to time the move.
          * @param motorID One-based motor identifier.
          */
-        virtual void motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID) {}
+        virtual void motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID) = 0;
 
         /**
          * @brief Temporarily hold the motor for the provided duration.
@@ -78,7 +78,7 @@ class MotorDriver
          * @param precision Cycle duration in milliseconds.
          * @param motor_id One-based motor identifier.
          */
-        virtual void motorStop(signed int wait_time, unsigned short precision, uint8_t motor_id) {}
+        virtual void motorStop(signed int wait_time, unsigned short precision, uint8_t motor_id) = 0;
 
         /**
          * @brief Put the motor into a sleep state after the wait duration.
@@ -86,27 +86,27 @@ class MotorDriver
          * @param precision Cycle duration in milliseconds.
          * @param motor_id One-based motor identifier.
          */
-        virtual void motorSleep(signed int wait_time, unsigned short precision, uint8_t motor_id) {}
+        virtual void motorSleep(signed int wait_time, unsigned short precision, uint8_t motor_id) = 0;
 
         /**
          * @brief Set per-dispatch opcode context for the next driver call.
          * @param op_seq Monotonic opcode sequence number.
          * @param motor_id One-based motor identifier.
          */
-        virtual void setOpcodeContext(uint32_t op_seq, uint8_t motor_id) { (void)op_seq; (void)motor_id; }
+        virtual void setOpcodeContext(uint32_t op_seq, uint8_t motor_id) = 0;
 
         /**
          * @brief Cancel the current motor command immediately.
          * @param motorID One-based motor identifier.
          */
-        virtual void abortCommand(uint8_t motorID) {}
+        virtual void abortCommand(uint8_t motorID) = 0;
 
         /**
          * @brief Query endstop state for a motor.
          * @param motor_id One-based motor identifier.
          * @return True when the selected motor has a tripped endstop.
          */
-        virtual bool isEndstopTripped(uint8_t motor_id) { (void)motor_id; return false; }
+        virtual bool isEndstopTripped(uint8_t motor_id) = 0;
 
         /**
          * @brief Configure endstop active polarity for a motor.
@@ -114,42 +114,37 @@ class MotorDriver
          * @param motor_id One-based motor identifier.
          * @return ESP_OK when applied, ESP_ERR_NOT_SUPPORTED when unavailable.
          */
-        virtual esp_err_t setEndstopTrippedPinSetting(uint8_t setting, uint8_t motor_id)
-        {
-            (void)setting;
-            (void)motor_id;
-            return ESP_ERR_NOT_SUPPORTED;
-        }
+        virtual esp_err_t setEndstopTrippedPinSetting(uint8_t setting, uint8_t motor_id) = 0;
 
         /**
          * @brief Return configured endstop active polarity for a motor.
          * @param motor_id One-based motor identifier.
          * @return True when active-high is configured.
          */
-        virtual bool getEndstopTrippedPinSetting(uint8_t motor_id) { (void)motor_id; return false; }
+        virtual bool getEndstopTrippedPinSetting(uint8_t motor_id) = 0;
 
     protected:
         /**
          * @brief Initialize driver-specific GPIOs.
          */
-        virtual void initMotorGpio() {}
+        virtual void initMotorGpio() = 0;
 
         /**
          * @brief Core execution loop for the driver task.
          */
-        virtual void IRAM_ATTR driver() {}
+        virtual void IRAM_ATTR driver() = 0;
 
         /**
          * @brief Request the next operation from the command layer.
          * @param id Zero-based motor index.
          */
-        virtual void getNextOpForDriver(uint8_t id) {}
+        virtual void getNextOpForDriver(uint8_t id) = 0;
 
         /**
          * @brief Peek at the next pending operation.
          * @param id Zero-based motor index.
          */
-        virtual void peekOpForDriver(uint8_t id) {}
+        virtual void peekOpForDriver(uint8_t id) = 0;
         
         /**
          * @brief  Validate a one-based motor ID and convert it to a zero-based index.

@@ -83,6 +83,19 @@ public:
         call_count++;
     }
 
+    void isrStartIoDriver() override {}
+    void isrStopIoDriver() override {}
+    bool isMotorRunning(uint8_t motor_id) override { (void)motor_id; return false; }
+    void setOpcodeContext(uint32_t op_seq, uint8_t motor_id) override { (void)op_seq; (void)motor_id; }
+    bool isEndstopTripped(uint8_t motor_id) override { (void)motor_id; return false; }
+    esp_err_t setEndstopTrippedPinSetting(uint8_t setting, uint8_t motor_id) override
+    {
+        (void)setting;
+        (void)motor_id;
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    bool getEndstopTrippedPinSetting(uint8_t motor_id) override { (void)motor_id; return false; }
+
     CallType last_call = NONE;
     config_setting last_setting = config_setting::MIN_SERVO_BOUND;
     uint32_t last_data1 = 0;
@@ -91,6 +104,12 @@ public:
     uint16_t last_u16 = 0;
     uint8_t last_motor_id = 0;
     uint32_t call_count = 0;
+
+private:
+    void initMotorGpio() override {}
+    void driver() override {}
+    void getNextOpForDriver(uint8_t id) override { (void)id; }
+    void peekOpForDriver(uint8_t id) override { (void)id; }
 };
 
 FakeMotorDriver gFake;

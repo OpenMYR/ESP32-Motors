@@ -235,7 +235,7 @@ void ServoDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorID)
  * @param precision Duration of each cycle in milliseconds.
  * @param motorID One-based servo index.
  */
-void ServoDriver::motorStop(int32_t wait_time, uint16_t precision, uint8_t motorID)
+void ServoDriver::motorStop(signed int wait_time, unsigned short precision, uint8_t motorID)
 {
     // wait_time, cycles to wait
     // precision, duration of wait cycle in milliseconds
@@ -284,6 +284,13 @@ void ServoDriver::motorSleep(signed int wait_time, unsigned short precision, uin
              static_cast<unsigned long long>(commandDeltaTime[motorIndex]));
 }
 
+void ServoDriver::setOpcodeContext(uint32_t op_seq, uint8_t motor_id)
+{
+    // No-op: servo dispatch does not use opcode sequencing fences.
+    (void)op_seq;
+    (void)motor_id;
+}
+
 /**
  * @brief Immediately mark the servo command as complete.
  * @param motorID One-based servo index.
@@ -293,6 +300,28 @@ void ServoDriver::abortCommand(uint8_t motorID)
     uint8_t motorIndex = 0;
     if (!resolve_motor_index(motorID, &motorIndex)) return;
     commandDone[motorIndex] = true;
+}
+
+bool ServoDriver::isEndstopTripped(uint8_t motor_id)
+{
+    // No-op: servos do not expose endstop inputs in this driver.
+    (void)motor_id;
+    return false;
+}
+
+esp_err_t ServoDriver::setEndstopTrippedPinSetting(uint8_t setting, uint8_t motor_id)
+{
+    // No-op: servos do not expose configurable endstop polarity in this driver.
+    (void)setting;
+    (void)motor_id;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+bool ServoDriver::getEndstopTrippedPinSetting(uint8_t motor_id)
+{
+    // No-op: servos do not expose configurable endstop polarity in this driver.
+    (void)motor_id;
+    return false;
 }
 /**
  * @brief Launch the servo driver loop on CORE_1.

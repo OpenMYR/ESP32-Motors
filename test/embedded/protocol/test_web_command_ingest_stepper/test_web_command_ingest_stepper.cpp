@@ -95,6 +95,20 @@ public:
         pushCall('U', 0, 0, motor_id);
     }
 
+    void isrStartIoDriver() override {}
+    void isrStopIoDriver() override {}
+    bool isMotorRunning(uint8_t motor_id) override { (void)motor_id; return false; }
+    void setOpcodeContext(uint32_t op_seq, uint8_t motor_id) override { (void)op_seq; (void)motor_id; }
+    void abortCommand(uint8_t motorID) override { (void)motorID; }
+    bool isEndstopTripped(uint8_t motor_id) override { (void)motor_id; return false; }
+    esp_err_t setEndstopTrippedPinSetting(uint8_t setting, uint8_t motor_id) override
+    {
+        (void)setting;
+        (void)motor_id;
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    bool getEndstopTrippedPinSetting(uint8_t motor_id) override { (void)motor_id; return false; }
+
     bool moveCalled = false;
     bool gotoCalled = false;
     bool stopCalled = false;
@@ -108,6 +122,12 @@ public:
     uint16_t callStepRate[16] = {};
     uint8_t callMotorId[16] = {};
     int callCount = 0;
+
+private:
+    void initMotorGpio() override {}
+    void driver() override {}
+    void getNextOpForDriver(uint8_t id) override { (void)id; }
+    void peekOpForDriver(uint8_t id) override { (void)id; }
 };
 
 FakeMotorDriver gFakeDriver;

@@ -28,38 +28,41 @@ public:
      * @param motor_id One-based servo index.
      * @return True when the servo remains active.
      */
-    bool isMotorRunning(uint8_t motor_id);
+    bool isMotorRunning(uint8_t motor_id) override;
 
     /**
      * @brief Launch the servo driver task on CORE_1.
      */
-    void isrStartIoDriver();
-    void isrStopIoDriver();
+    void isrStartIoDriver() override;
+    void isrStopIoDriver() override;
 
     /**
      * @brief Command an absolute angle target for a servo.
      */
-    void motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID);
+    void motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID) override;
 
     /**
      * @brief Increment the servo angle by a delta value.
      */
-    void motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID);
+    void motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID) override;
 
     /**
      * @brief Pause the servo for the provided wait cycles.
      */
-    void motorStop(int32_t wait_time, uint16_t precision, uint8_t motorID);
+    void motorStop(signed int wait_time, unsigned short precision, uint8_t motorID) override;
 
     /**
      * @brief Put the motor to sleep for the wait duration.
      */
-    void motorSleep(signed int wait_time, unsigned short precision, uint8_t motor_id);
+    void motorSleep(signed int wait_time, unsigned short precision, uint8_t motor_id) override;
+
+    // ServoDriver satisfies these MotorDriver hooks with no-op/not-supported behavior.
+    void setOpcodeContext(uint32_t op_seq, uint8_t motor_id) override;
 
     /**
      * @brief Abort the current command immediately.
      */
-    void abortCommand(uint8_t motorID);
+    void abortCommand(uint8_t motorID) override;
 
     /**
      * @brief Return the singleton ServoDriver instance.
@@ -70,13 +73,17 @@ public:
     /**
      * @brief Update servo configuration such as bounds.
      */
-    void changeMotorSettings(MotorDriver::config_setting setting, uint32_t data1, uint32_t data2, uint8_t motorID);
+    void changeMotorSettings(MotorDriver::config_setting setting, uint32_t data1, uint32_t data2, uint8_t motorID) override;
+
+    bool isEndstopTripped(uint8_t motor_id) override;
+    esp_err_t setEndstopTrippedPinSetting(uint8_t setting, uint8_t motor_id) override;
+    bool getEndstopTrippedPinSetting(uint8_t motor_id) override;
 
 private:
     /**
      * @brief Attach servo objects to their GPIO pins.
      */
-    void initMotorGpio();
+    void initMotorGpio() override;
 
     /**
      * @brief Entry point for the servo RTOS task.
@@ -86,7 +93,7 @@ private:
     /**
      * @brief Driver loop that tracks servo positions and polls commands.
      */
-    void driver();
+    void driver() override;
 
     static ServoDriver *instance;
     CommandLayer *commandInstance;
@@ -120,13 +127,13 @@ private:
      * @brief Fetch the next queued command from the command layer.
      * @param id Zero-based motor index.
      */
-    void getNextOpForDriver(uint8_t id);
+    void getNextOpForDriver(uint8_t id) override;
 
     /**
      * @brief Peek at the next operation without removing it.
      * @param id Zero-based motor index.
      */
-    void peekOpForDriver(uint8_t id);
+    void peekOpForDriver(uint8_t id) override;
 };
 
 #endif // MYR_SERVODRIVER_H

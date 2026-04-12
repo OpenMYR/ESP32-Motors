@@ -31,37 +31,37 @@ public:
      * @param motor_id Zero-based motor index.
      * @return True when the motor is active.
      */
-    bool isMotorRunning(uint8_t motor_id);
+    bool isMotorRunning(uint8_t motor_id) override;
 
     /**
      * @brief Launch the driver FreeRTOS task on CORE_1.
      */
-    void isrStartIoDriver();
+    void isrStartIoDriver() override;
     
     /**
      * @brief Shutdown the driver task and disable outputs.
      */
-    void isrStopIoDriver();
+    void isrStopIoDriver() override;
 
     /**
      * @brief Command a direction/speed target for a specific motor.
      */
-    void motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID);
+    void motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID) override;
 
     /**
      * @brief Alias for motorGoTo that follows the MotorDriver interface.
      */
-    void motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorID);
+    void motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorID) override;
 
     /**
      * @brief Pause a motor for a fixed duration then release.
      */
-    void motorStop(int32_t wait_time, uint16_t precision, uint8_t motorID);
+    void motorStop(signed int wait_time, unsigned short precision, uint8_t motorID) override;
 
     /**
      * @brief Immediately halt the motor by cutting PWM.
      */
-    void abortCommand(uint8_t motorID);
+    void abortCommand(uint8_t motorID) override;
 
     /**
      * @brief Return the singleton BrushedMotorDriver instance.
@@ -72,13 +72,13 @@ public:
     /**
      * @brief Apply driver configuration changes (UI placeholder).
      */
-    void changeMotorSettings(MotorDriver::config_setting setting, uint32_t data1, uint32_t data2, uint8_t motorID);
+    void changeMotorSettings(MotorDriver::config_setting setting, uint32_t data1, uint32_t data2, uint8_t motorID) override;
 
 private:
     /**
      * @brief Configure the GPIOs needed by the H-bridge and endstops.
      */
-    void initMotorGpio();
+    void initMotorGpio() override;
 
     /**
      * @brief Task entry that initializes PWM and calls driver().
@@ -88,7 +88,7 @@ private:
     /**
      * @brief Driver loop that polls for commands and manages dwell times.
      */
-    void IRAM_ATTR driver();
+    void IRAM_ATTR driver() override;
 
     static BrushedMotorDriver *instance;
     CommandLayer *commandInstance;
@@ -132,8 +132,8 @@ private:
     static void setSpeed(uint8_t power, int8_t direction);
 
     bool isValidOpCode(Op *);
-    void getNextOpForDriver(uint8_t id);
-    void peekOpForDriver(uint8_t id);
+    void getNextOpForDriver(uint8_t id) override;
+    void peekOpForDriver(uint8_t id) override;
 };
 
 #endif // MYR_BRUSHEDMOTORDRIVER_H
