@@ -41,7 +41,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
 
       - name: Cache PlatformIO
         uses: actions/cache@v4
@@ -93,19 +92,20 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install --upgrade platformio intelhex
 
-      - name: Unit test smoke (esp32_test)
+      - name: Unit test smoke (embedded)
         run: |
           set -e
           pio test -e esp32_test -f embedded/test_demo
-          pio test -e esp32_test -f embedded/drivers/test_servo_driver
-          pio test -e esp32_test -f embedded/drivers/test_stepper_driver
+          pio test -e esp32_test_servo -f embedded/drivers/test_servo_driver
+          pio test -e esp32_test_stepper -f embedded/drivers/test_stepper_driver
 
 #      - name: Unit tests (native)
 #        run: |
 #          set -e
 #          pio test -e native
 
-      - name: Full unit test run (esp32_test)
+      - name: Full unit test run (embedded)
         run: |
           set -e
-          pio test -e esp32_test
+          pio test -e esp32_test_stepper
+          pio test -e esp32_test_servo

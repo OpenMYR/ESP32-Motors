@@ -33,7 +33,19 @@
 					Confirm Password: <input id="newOTAPass2" type="password"><br><br>
 					<input id="change" type="button" value="Change" style="width:100px">
 				</form>
+				<p id="changeStatus" class="status"></p>
 			</div>
+			<h2>Firmware OTA Update</h2>
+			<div class="container">
+				<form id="otaForm">
+					Username: <input id="otaUser" type="text" autocomplete="username" required><br><br>
+					Password: <input id="otaPass" type="password" autocomplete="current-password" required><br><br>
+					Select Firmware (.bin): <input id="firmware" name="firmware" type="file" accept=".bin,application/octet-stream" required><br><br>
+					<input id="upload" type="submit" value="Upload" style="width:100px">
+				</form>
+				<p id="otaStatus"></p>
+			</div>
+			<p>Authentication is required before upload starts.</p>
 			<p id="footer">Go to <a href="http://www.OpenMYR.com/">OpenMYR.com</a> for more info</p>
 		</div>
 	</div>

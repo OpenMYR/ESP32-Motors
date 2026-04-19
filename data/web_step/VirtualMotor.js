@@ -40,7 +40,7 @@ class VirtualMotor {
 					code : "G",
 					data : [
 						i,
-						1,
+						0,
 						Math.round(this.motorPositions[i]),
 						this.traverseSpeed
 					]

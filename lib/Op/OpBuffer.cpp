@@ -1,190 +1,160 @@
-#include <esp_log.h>
-
 #include "OpBuffer.h"
 
-OpBuffer *OpBuffer::instance = NULL;
-SemaphoreHandle_t xMutex = NULL;
-uint16_t head[OP_BUFFER_COUNT];
-uint16_t tail[OP_BUFFER_COUNT];
-uint16_t length[OP_BUFFER_SIZE];
+#include "esp_log.h"
 
-OpBuffer::OpBuffer()
-{
-	Serial.write("OpBuffer const\n");
-	delay(200);
-	if (xMutex == NULL)
-	{
-		xMutex = xSemaphoreCreateMutex();
-		if (xMutex != NULL)
-		{
-			xSemaphoreGive(xMutex);
-		}
-	}
-	init();
+namespace {
+const char *TAG = "OpBuffer";
+SemaphoreHandle_t gMutex = nullptr;
+uint16_t gHead[OP_BUFFER_COUNT];
+uint16_t gTail[OP_BUFFER_COUNT];
+uint16_t gLength[OP_BUFFER_COUNT];
+uint32_t gNextSeq[OP_BUFFER_COUNT];
+} // namespace
+
+OpBuffer *OpBuffer::instance = nullptr;
+
+OpBuffer::OpBuffer() {
+    if (gMutex == nullptr) {
+        gMutex = xSemaphoreCreateMutex();
+    }
+    init();
 }
 
-void OpBuffer::init()
-{
-
-	OpBuffer::instance->reset();
+void OpBuffer::init() {
+    OpBuffer::instance->reset();
 }
 
-OpBuffer *OpBuffer::getInstance()
-{
-	if (OpBuffer::instance == NULL)
-	{
-		OpBuffer::instance = new OpBuffer();
-	}
-	return OpBuffer::instance;
+OpBuffer *OpBuffer::getInstance() {
+    if (OpBuffer::instance == nullptr) {
+        OpBuffer::instance = new OpBuffer();
+    }
+    return OpBuffer::instance;
 }
 
-int8_t OpBuffer::storeOp(Op *op)
-{
+int8_t OpBuffer::storeOp(Op *op) {
+    int8_t error = -1;
 
-	int8_t error = -1;
+    if (xSemaphoreTake(gMutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+        if (validIndex(op->motorID)) {
+            if (gLength[op->motorID] < OP_BUFFER_SIZE) {
+                Op sequencedOp = *op;
+                sequencedOp.opSeq = gNextSeq[op->motorID]++;
+                opQueue[op->motorID][(gTail[op->motorID] + 1) % OP_BUFFER_SIZE] = sequencedOp;
+                gTail[op->motorID] = (gTail[op->motorID] + 1) % OP_BUFFER_SIZE;
+                gLength[op->motorID]++;
+                error = 0;
+            } else {
+                ESP_LOGE(TAG, "storeOp failed: buffer %u full", static_cast<unsigned int>(op->motorID));
+                error = -1;
+            }
+        }
 
-	if (xSemaphoreTake(xMutex, 200) == pdTRUE)
-	{
-		if (validIndex(op->motorID))
-		{
-			if (length[op->motorID] < OP_BUFFER_SIZE)
-			{
-				opQueue[op->motorID][(tail[op->motorID] + 1) % OP_BUFFER_SIZE] = *op;
-				tail[op->motorID] = (tail[op->motorID] + 1) % OP_BUFFER_SIZE;
-				length[op->motorID]++;
-				error = 0;
-			}
-			else
-			{
-				log_e("OpBuffer Failed: Buffer %d Full\n", op->motorID);
-				error = -1;
-			}
-		}
-
-		xSemaphoreGive(xMutex);
-	}
-	else
-	{
-		log_e("OpBuffer Failed: Mutex Locked\n");
-		error = -2;
-	}
-	return error;
+        xSemaphoreGive(gMutex);
+    } else {
+        ESP_LOGE(TAG, "storeOp failed: mutex timeout");
+        error = -2;
+    }
+    return error;
 }
 
-Op *OpBuffer::getOp(uint8_t id)
-{
-	if (!validIndex(id))
-		return NULL;
-	Op *tempOp;
-	tempOp = NULL;
+Op *OpBuffer::getOp(uint8_t id) {
+    if (!validIndex(id)) return nullptr;
 
-	if (length[id] > 0)
-	{
-		tempOp = &opQueue[id][head[id]];
+    Op *tempOp = nullptr;
+    if (xSemaphoreTake(gMutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+        if (gLength[id] > 0) {
+            tempOp = &opQueue[id][gHead[id]];
+            gHead[id] = (gHead[id] + 1) % OP_BUFFER_SIZE;
+            gLength[id]--;
+        }
+        xSemaphoreGive(gMutex);
+    } else {
+        ESP_LOGE(TAG, "getOp failed: mutex timeout");
+    }
 
-		head[id] = (head[id] + 1) % OP_BUFFER_SIZE;
-		length[id]--;
-	}
-
-	return tempOp;
+    return tempOp;
 }
 
-Op *OpBuffer::peekOp(uint8_t id)
-{
-	if (!validIndex(id)){
-		return NULL;
-	}
-	Op *tempOp;
-	tempOp = NULL;
+Op *OpBuffer::peekOp(uint8_t id) {
+    if (!validIndex(id)) return nullptr;
 
-	if (length[id] > 0)
-	{
-		tempOp = &opQueue[id][head[id]];
-	}
+    Op *tempOp = nullptr;
+    if (xSemaphoreTake(gMutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+        if (gLength[id] > 0) {
+            tempOp = &opQueue[id][gHead[id]];
+        }
+        xSemaphoreGive(gMutex);
+    } else {
+        ESP_LOGE(TAG, "peekOp failed: mutex timeout");
+    }
 
-	return tempOp;
+    return tempOp;
 }
 
-void OpBuffer::clear(uint8_t id)
-{
-	if (!validIndex(id))
-		return;
+void OpBuffer::clear(uint8_t id) {
+    if (!validIndex(id)) return;
 
-	if (xSemaphoreTake(xMutex, 200) == pdTRUE)
-	{
-		//tail[id]
-		head[id] = (tail[id] + 1) % OP_BUFFER_SIZE;
-		length[id] = 0;
-		xSemaphoreGive(xMutex);
-	}
-	else
-	{
-		log_e("OpBuffer Failed: Mutex Locked\n");
-	}
+    if (xSemaphoreTake(gMutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+        gHead[id] = (gTail[id] + 1) % OP_BUFFER_SIZE;
+        gLength[id] = 0;
+        xSemaphoreGive(gMutex);
+    } else {
+        ESP_LOGE(TAG, "clear failed: mutex timeout");
+    }
 }
 
-void OpBuffer::killCurrentOp(uint8_t id)
-{
-	if (!validIndex(id))
-		return;
-	uint8_t data[] = {0x00, 0x00, 'K', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, id};
-	Op StopOp = Op(data);
-	if (storeOp(&StopOp) >= 0)
-	{
-		log_v("kill cool %d", 'K');
-	}
-	else
-	{
-		log_e("kill error %d", 'K');
-	}
+void OpBuffer::killCurrentOp(uint8_t id) {
+    if (!validIndex(id)) return;
+
+    uint8_t data[] = {0x00, 0x00, 'K', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, id};
+    Op stopOp(data);
+    if (storeOp(&stopOp) >= 0) {
+        ESP_LOGV(TAG, "kill op enqueued for motor %u", static_cast<unsigned int>(id));
+    } else {
+        ESP_LOGE(TAG, "kill op enqueue failed for motor %u", static_cast<unsigned int>(id));
+    }
 }
 
-bool OpBuffer::isEmpty(uint8_t id)
-{
-	if (!validIndex(id))
-		return true;
+bool OpBuffer::isEmpty(uint8_t id) {
+    if (!validIndex(id)) return true;
 
-	return length[id] == 0;
+    bool isBufferEmpty = true;
+    if (xSemaphoreTake(gMutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+        isBufferEmpty = gLength[id] == 0;
+        xSemaphoreGive(gMutex);
+    } else {
+        ESP_LOGE(TAG, "isEmpty failed: mutex timeout");
+    }
+    return isBufferEmpty;
 }
 
-bool OpBuffer::isFull(uint8_t id)
-{
-	if (!validIndex(id))
-		return true;
-	bool isBufferFull = true;
-	if (xSemaphoreTake(xMutex, 200) == pdTRUE)
-	{
-		isBufferFull = length[id] == OP_BUFFER_SIZE;
+bool OpBuffer::isFull(uint8_t id) {
+    if (!validIndex(id)) return true;
 
-		xSemaphoreGive(xMutex);
-	}
-	else
-	{
-		log_e("OpBuffer Failed: Mutex Locked\n");
-	}
+    bool isBufferFull = true;
+    if (xSemaphoreTake(gMutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+        isBufferFull = gLength[id] == OP_BUFFER_SIZE;
+        xSemaphoreGive(gMutex);
+    } else {
+        ESP_LOGE(TAG, "isFull failed: mutex timeout");
+    }
 
-	return isBufferFull;
+    return isBufferFull;
 }
 
-void OpBuffer::reset()
-{
-	//memset(opQueue, 0, sizeof(opQueue));
-	for (int i = 0; i < OP_BUFFER_COUNT; i++)
-	{
-		clear(i);
-	}
+void OpBuffer::reset() {
+    for (int i = 0; i < OP_BUFFER_COUNT; i++) {
+        clear(i);
+        gNextSeq[i] = 1;
+    }
 }
 
-uint32_t OpBuffer::opBufferCapacity(uint8_t id)
-{
-	if (!validIndex(id))
-		return 0;
-	return (uint32_t)OP_BUFFER_SIZE;
+uint32_t OpBuffer::opBufferCapacity(uint8_t id) {
+    if (!validIndex(id)) return 0;
+
+    return static_cast<uint32_t>(OP_BUFFER_SIZE);
 }
 
-bool OpBuffer::validIndex(uint8_t id)
-{
-	if (id < OP_BUFFER_COUNT)
-		return true;
-	return false;
+bool OpBuffer::validIndex(uint8_t id) {
+    return id < OP_BUFFER_COUNT;
 }

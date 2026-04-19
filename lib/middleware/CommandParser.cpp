@@ -1,252 +1,145 @@
-#if __has_include("config/LocalConfig.h")
-#include "config/LocalConfig.h"
-#else
-#include "config/DefaultConfig.h"
-#endif
+#include "config/Config.h"
 
+#include <cstring>
 #include <esp_log.h>
+#include <string>
 
 #include "CommandParser.h"
-#include "OpBuffer.h"
 #include "Op.h"
+#include "OpBuffer.h"
 #include "WifiController.h"
-#include "CommandLayer.h"
 
-String const TAG = "CommandParser";
+namespace {
+const char *TAG = "CommandParser";
+constexpr uint16_t kMaxMotorCount = 16;
 
-StaticJsonDocument<2000> doc;
+esp_err_t wifi_try_connect(const std::string *ssid, const std::string *pass)
+{
+    return WifiController::tryConnectToSta(ssid, pass);
+}
+
+esp_err_t wifi_set_sta_credentials(const std::string *ssid, const std::string *pass)
+{
+    return WifiController::setDefaultStaCredentials(ssid, pass);
+}
+
+esp_err_t wifi_set_default_mode(uint16_t mode)
+{
+    return WifiController::setDefaultMode(mode);
+}
+
+void wifi_fire_disconnect()
+{
+    WifiController::fireWifiEvent(WifiController::MYR_WIFI_EVENT_DISCONNECT, nullptr);
+}
+
+esp_err_t wifi_change_ota_pass(const std::string *old_pass, const std::string *new_pass)
+{
+    return WifiController::changeOTAPass(old_pass, new_pass);
+}
+
+const CommandParser::WifiOps kDefaultWifiOps = {
+    wifi_try_connect,
+    wifi_set_sta_credentials,
+    wifi_set_default_mode,
+    wifi_fire_disconnect,
+    wifi_change_ota_pass,
+};
+
+template <size_t N>
+std::string bounded_cstr_field_to_string(const char (&field)[N])
+{
+    const size_t len = strnlen(field, N);
+    return std::string(field, len);
+}
+
 OpBuffer *buffer = OpBuffer::getInstance();
+} // namespace
+
 std::function<void(command_response_packet &)> CommandParser::ack_func;
+CommandParser::WifiOps CommandParser::wifiOps = kDefaultWifiOps;
 bool CommandParser::ota_active = false;
 
-void CommandParser::motor_process_command(struct Op packet, IPAddress addr)
+void CommandParser::motor_process_command(struct Op packet, ip4_addr_t addr)
 {
-    if (ota_active)
+    (void)addr;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(processMotorOp(packet));
+}
+
+void CommandParser::wifi_process_command(struct wifi_command_packet packet, ip4_addr_t addr)
+{
+    (void)addr;
+
+    std::string lhs = bounded_cstr_field_to_string(packet.ssid);
+    std::string rhs = bounded_cstr_field_to_string(packet.password);
+    WifiOpcode opcode = WifiOpcode::Connect;
+    if (!try_parse_wifi_opcode(packet.opcode, &opcode))
+    {
+        ESP_LOGW(TAG, "unsupported wifi opcode '%c'", packet.opcode);
         return;
-
-    if (packet.queue == 0)
-    {
-        //kill queue and active command.
-        buffer->clear(packet.motorID);
-        buffer->killCurrentOp(packet.motorID);
     }
-
-    //CommandLayer::opcodeGoto(dataOne, dataTwo, motor_id);
-    if (buffer->storeOp(&packet) >= 0)
-    {
-        log_v("cool %d", packet.stepNum);
-    }
-    else
-    {
-        log_e("error %d", packet.stepNum);
-    }
+    ESP_ERROR_CHECK_WITHOUT_ABORT(processWifiCommand(opcode, &lhs, &rhs));
 }
 
-void CommandParser::wifi_process_command(struct wifi_command_packet packet, IPAddress addr)
+esp_err_t CommandParser::processMotorOp(const Op &op)
 {
-    if (ota_active)
-        return;
+    if (ota_active) return ESP_OK;
 
-    if (packet.opcode == 'C')
+    if (op.queue == 0)
     {
-        //change_opmode(true, packet.ssid, packet.password);
+        buffer->clear(op.motorID);
+        buffer->killCurrentOp(op.motorID);
     }
-    else if (packet.opcode == 'D')
+
+    Op opCopy = op;
+    if (buffer->storeOp(&opCopy) >= 0)
     {
-        //change_opmode(false, "", "");
+        ESP_LOGV(TAG, "queued opcode=%c stepNum=%ld", op.opcode, static_cast<long>(op.stepNum));
+        return ESP_OK;
     }
-    if (packet.opcode == 'O')
-    {
-        //change_ota_pass(packet.ssid, packet.password);
-    }
+
+    ESP_LOGE(TAG, "queue store failed opcode=%c stepNum=%ld", op.opcode, static_cast<long>(op.stepNum));
+    return ESP_FAIL;
 }
 
-bool CommandParser::json_parseCommands(String jsonString, IPAddress ip)
+esp_err_t CommandParser::processWifiCommand(WifiOpcode opcode, const std::string *lhs, const std::string *rhs)
 {
-    bool return202Required = true;
-    if (ota_active)
-        return return202Required;
+    if (ota_active) return ESP_OK;
 
-    log_v("Parsing json string of length %d", jsonString.length());
-    log_v("%s", jsonString.c_str());
+    switch (opcode)
+    {
+    case WifiOpcode::Connect:
+    {
+        if (lhs == nullptr || rhs == nullptr) return ESP_ERR_INVALID_ARG;
 
-    DeserializationError error = deserializeJson(doc, jsonString);
-    if (error)
-    {
-        log_e("deserializeJson() failed: %s", error.c_str());
-        return return202Required;
-    }
-    
-    JsonArray commandArray = doc["commands"];
-    if (commandArray.isNull())
-    {
-        log_i("No commands to parse");
-        return return202Required;
-    }
+        esp_err_t err = wifiOps.tryConnectToSta(lhs, rhs);
+        if (err != ESP_OK) return err;
 
-    log_v("%d Commands found", commandArray.size());
-    for (unsigned int i = 0; i < commandArray.size(); i++)
-    {
-        JsonObject cmd = commandArray[i];
-        if (isValidCommand(&cmd))
-        {
-            return202Required = return202Required && decodeCommand(&cmd);
-        }
-    }
-    return return202Required;
-}
+        err = wifiOps.setDefaultStaCredentials(lhs, rhs);
+        if (err != ESP_OK) return err;
 
-bool CommandParser::isValidCommand(JsonObject *cmd)
-{
-    return (!cmd->isNull() && cmd->containsKey("code") && cmd->containsKey("data"));
-}
-
-bool CommandParser::decodeCommand(JsonObject *cmd)
-{
-    const char *code = (*cmd)["code"];
-    log_v("Code: %d", (int)(*code));
-    switch (*code)
-    {
-    case 'C':
-    case 'D':
-    case 'O':
-    {
-        parseConfig(cmd, *code);
-        return false; //If we change networks, we dont want to send a 200 code
-        break;
+        return wifiOps.setDefaultMode(MYR_WIFI_MODE_STATION);
     }
-    case 'M':
-    case 'S':
-    case 'G':
-    case 'I':
-    {
-        parseMotorCommand(cmd, *code);
-        break;
-    }
-    case 'U':
-    case 'H':
-    case 'L':
-    {
-        parseMotorConfig(cmd, *code);
-        break;
-    }
+    case WifiOpcode::Disconnect:
+        wifiOps.fireDisconnectEvent();
+        return wifiOps.setDefaultMode(MYR_WIFI_MODE_AP);
+    case WifiOpcode::ChangeOtaPassword:
+        if (lhs == nullptr || rhs == nullptr) return ESP_ERR_INVALID_ARG;
+        return wifiOps.changeOtaPass(lhs, rhs);
     default:
-        log_i("Unknown packet");
-        break;
-    }
-    return true;
-}
-
-void CommandParser::parseConfig(JsonObject *cmd, char code)
-{
-    JsonArray dataArray = (*cmd)["data"];
-
-    if (dataArray.size() != 2)
-    {
-        log_i("Malformed data array!");
-        return;
-    }
-    esp_err_t err;
-    String ssid = dataArray[0];
-    String pass = dataArray[1];
-
-    if(code == 'C') {
-        err = WifiController::tryConnectToSta(&ssid, &pass);
-        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
-        if (err) return;
-        err = WifiController::setDefaultStaCredentials(&ssid, &pass);
-        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
-        err = WifiController::setDefaultMode(MYR_WIFI_MODE_STATION);
-        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
-    }
-    else if(code == 'D') {
-        WifiController::fireWifiEvent(WifiController::MYR_WIFI_EVENT_DISCONNECT, NULL);
-        err = WifiController::setDefaultMode(MYR_WIFI_MODE_AP);
-        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
-    } else if(code == 'O') WifiController::changeOTAPass(&ssid, &pass);
-    else log_i("Unknown command %c", code);
-}
-
-void CommandParser::parseMotorCommand(JsonObject *cmd, char code)
-{
-    JsonArray dataArray = (*cmd)["data"];
-    if (dataArray.size() != 4)
-    {
-        log_i("Malformed data array!");
-        return;
-    }
-
-    uint32_t motor_id = dataArray[0];
-    uint32_t queue = dataArray[1];
-    int32_t dataOne = dataArray[2];
-    uint32_t dataTwo = dataArray[3];
-
-    Op parsed_motor_command;
-    parsed_motor_command.port = 0;
-    parsed_motor_command.motorID = motor_id;
-    parsed_motor_command.opcode = code;
-    parsed_motor_command.queue = queue;
-    parsed_motor_command.stepNum = dataOne;
-    parsed_motor_command.stepRate = dataTwo;
-
-    if (parsed_motor_command.queue == 0)
-    {
-        //kill queue and active command.
-        buffer->clear(parsed_motor_command.motorID);
-        buffer->killCurrentOp(parsed_motor_command.motorID);
-    }
-
-    //CommandLayer::opcodeGoto(dataOne, dataTwo, motor_id);
-    if (buffer->storeOp(&parsed_motor_command) >= 0)
-    {
-        log_v("cool %d", dataOne);
-    }
-    else
-    {
-        log_e("error %d", dataOne);
+        ESP_LOGW(TAG, "unsupported wifi opcode '%c'", to_char(opcode));
+        return ESP_OK;
     }
 }
 
-void CommandParser::parseMotorConfig(JsonObject *cmd, char code)
+void CommandParser::setWifiOpsForTest(const WifiOps *ops)
 {
-    JsonArray dataArray = (*cmd)["data"];
-    if (dataArray.size() != 4)
-    {
-        log_i("Malformed data array!");
-        return;
-    }
+    if (ops != nullptr) wifiOps = *ops;
+}
 
-    uint32_t motor_id = dataArray[0];
-    uint32_t queue = dataArray[1];
-    uint32_t dataOne = dataArray[2];
-    uint32_t dataTwo = dataArray[3];
-
-    Op parsed_motor_command;
-    parsed_motor_command.port = 0;
-    parsed_motor_command.motorID = motor_id;
-    parsed_motor_command.opcode = code;
-    parsed_motor_command.queue = queue;
-    parsed_motor_command.stepNum = 0;
-    parsed_motor_command.stepRate = dataTwo;
-    //uint8_t dummy_ip[4];
-    //motor_process_command(parsed_motor_command, dummy_ip);
-
-    if (parsed_motor_command.queue == 0)
-    {
-        //kill queue and active command.
-        buffer->clear(parsed_motor_command.motorID);
-        buffer->killCurrentOp(parsed_motor_command.motorID);
-    }
-
-    //CommandLayer::opcodeGoto(dataOne, dataTwo, motor_id);
-    if (buffer->storeOp(&parsed_motor_command) >= 0)
-    {
-        log_v("cool %d", dataOne);
-    }
-    else
-    {
-        log_e("error %d", dataOne);
-    }
+void CommandParser::resetWifiOpsForTest()
+{
+    wifiOps = kDefaultWifiOps;
 }
 
 void CommandParser::register_udp_ack_func(std::function<void(command_response_packet &)> f)
@@ -254,13 +147,22 @@ void CommandParser::register_udp_ack_func(std::function<void(command_response_pa
     ack_func = f;
 }
 
-void CommandParser::stop_motors()
+void CommandParser::stop_all_motors()
 {
-    uint16_t maxMotorCount = 16;
-    for (int id = 0; id < maxMotorCount; id++)
+    for (uint16_t id = 0; id < kMaxMotorCount; id++)
     {
         buffer->clear(id);
         buffer->killCurrentOp(id);
     }
+}
+
+void CommandParser::enter_ota_mode()
+{
+    stop_all_motors();
     ota_active = true;
+}
+
+void CommandParser::exit_ota_mode()
+{
+    ota_active = false;
 }

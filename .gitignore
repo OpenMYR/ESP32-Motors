@@ -33,6 +33,7 @@
 
 # PIO
 .pio
+.pio-core
 
 # VS Code
 .vscode/.browse.c_cpp.db*
@@ -42,6 +43,10 @@
 .vscode/extensions.json
 
 # Local Project
-src/config/LocalConfig.h
-/package-lock.json
 include/config/LocalConfig.h
+/package-lock.json
+/.pio_home/
+/managed_components/
+
+# code coverage
+coverage

@@ -1,7 +1,10 @@
 #ifndef MYR_OPBUFFER_H
 #define MYR_OPBUFFER_H
 
-#include <ESPAsyncWebServer.h>
+#include <stdint.h>
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #include "Op.h"
 
@@ -12,7 +15,7 @@ class OpBuffer
 {
 public:
     OpBuffer();
-    static OpBuffer* getInstance();
+    static OpBuffer *getInstance();
     int8_t storeOp(Op *);
     Op *getOp(uint8_t);
     //static int removeFirstOp(uint8_t);

@@ -1,10 +1,5 @@
 // Includes for unit test framework
-#include <Arduino.h>
 #include <unity.h>
-
-// Includes for project libraries
-#include <FS.h>
-#include <WiFi.h>
 
 // Includes for this unit test
 #include <freertos/FreeRTOS.h>
@@ -18,13 +13,10 @@
 
 TaskHandle_t _task = NULL;
 uint8_t _core = 1;
-uint8_t _queueSize = 0;
-uint32_t _queueMaxTestWaitTicks = 20; 
 bool _localTestVar;
 
 void setUp(void) {
     // set stuff up here
-    _queueSize = 32;
     _localTestVar = false;
 
 }
@@ -57,7 +49,7 @@ void setup_new_pinnedTask(void){
         _core);
 
     TEST_ASSERT_NOT_NULL(_task);
-    vTaskDelay(100);
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     vTaskDelete(_task);
 
@@ -65,17 +57,13 @@ void setup_new_pinnedTask(void){
 }
 
 
-void setup()
+extern "C" void app_main(void)
 {
-    delay(2000); // service delay
+    vTaskDelay(pdMS_TO_TICKS(2000));
     UNITY_BEGIN();
 
     RUN_TEST(setup_new_pinnedTask);
 
 
     UNITY_END(); // stop unit testing
-}
-
-void loop()
-{
 }

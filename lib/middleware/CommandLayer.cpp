@@ -1,46 +1,46 @@
-#if __has_include("config/LocalConfig.h")
-#include "config/LocalConfig.h"
-#else
-#include "config/DefaultConfig.h"
-#endif
+#include "config/Config.h"
 
 #include "CommandLayer.h"
-#include "ServoDriver.h"
-#include "StepperDriver.h"
-#include "BrushedMotorDriver.h"
+
+#include "esp_log.h"
 #include "OpBuffer.h"
 
-#define CORE_1 1
-#define UPDATE_FREQ 60
+#if SERVO == 1
+#include "ServoDriver.h"
+#elif STEPPER == 1
+#include "StepperDriver.h"
+#elif BDC == 1
+#include "BrushedMotorDriver.h"
+#endif
 
-#define UPDATE_DWELL 1000 / UPDATE_FREQ
+namespace {
+const char *TAG = "CommandLayer";
+}
 
-hw_timer_t *timerOpCode = NULL;
-CommandLayer *CommandLayer::instance = NULL;
-MotorDriver *CommandLayer::driver = NULL;
+CommandLayer *CommandLayer::instance = nullptr;
+MotorDriver *CommandLayer::driver = nullptr;
 
 CommandLayer::CommandLayer()
 {
-
-#if SERVO==1
+#if SERVO == 1
     driver = ServoDriver::getInstance();
-#elif STEPPER==1
+#elif STEPPER == 1
     driver = StepperDriver::getInstance();
-#elif BDC==1
+#elif BDC == 1
     driver = BrushedMotorDriver::getInstance();
 #endif
-    log_v("CommandLayer const\n");
+    ESP_LOGV(TAG, "CommandLayer ctor");
 }
 
 void CommandLayer::init()
 {
     CommandLayer::driver->isrStartIoDriver();
-    log_v("CommandLayer init\n");
+    ESP_LOGV(TAG, "CommandLayer init");
 }
 
 CommandLayer *CommandLayer::getInstance()
 {
-    if (instance == NULL)
+    if (instance == nullptr)
     {
         instance = new CommandLayer();
     }
@@ -74,6 +74,7 @@ void CommandLayer::opcodeMotorSetting(MotorDriver::config_setting setting, uint3
 
 void CommandLayer::opcodeAbortCommand(uint8_t motor_id)
 {
+    ESP_LOGW(TAG, "Abort active command: motor=%u", static_cast<unsigned>(motor_id));
     CommandLayer::driver->abortCommand(motor_id);
 }
 
@@ -85,7 +86,7 @@ void CommandLayer::fetchMotorOpCode(uint8_t id)
 
 void CommandLayer::FillDriverFromQueue()
 {
-    /*     delay(100);
+    /* Legacy queue feeder path kept for reference.
     while (true)
     {
         for (int i = 0; (i < MAX_MOTORS); i++)
@@ -102,38 +103,45 @@ void CommandLayer::FillDriverFromQueue()
 
 void CommandLayer::parseSubmittOp(uint8_t id, Op *op)
 {
-    if (op == NULL)
-        return;
-    //log_i("Code: %d", (int)(op->opcode));
-    switch (op->opcode)
+    (void)id;
+    if (op == nullptr) return;
+    CommandLayer::driver->setOpcodeContext(op->opSeq, op->motorID);
+    MotorOpcode opcode;
+    if (!try_parse_motor_opcode(op->opcode, &opcode)) return;
+
+    switch (opcode)
     {
-    case 'M':
+    case MotorOpcode::Move:
     {
         opcodeMove(op->stepNum, op->stepRate, op->motorID);
         break;
     }
-    case 'S':
+    case MotorOpcode::Stop:
     {
         opcodeStop(op->stepNum, op->stepRate, op->motorID);
         break;
     }
-    case 'G':
+    case MotorOpcode::Goto:
     {
         opcodeGoto(op->stepNum, op->stepRate, op->motorID);
         break;
     }
-    case 'I':
+    case MotorOpcode::Sleep:
     {
         opcodeSleep(op->stepNum, op->stepRate, op->motorID);
         break;
     }
-    case 'U':
+    case MotorOpcode::Microstep:
     {
         opcodeMotorSetting(MotorDriver::config_setting::MICROSTEPPING, op->stepRate, op->motorID, op->motorID);
         break;
     }
+    case MotorOpcode::Abort:
+    {
+        opcodeAbortCommand(op->motorID);
+        break;
+    }
     default:
-        //log_i("parseSubmittOp Unknown packet");
         break;
     }
 }
@@ -146,13 +154,15 @@ void CommandLayer::getNextOp(uint8_t driverId)
 void CommandLayer::peekNextOp(uint8_t driverId)
 {
     Op *peekedOp = OpBuffer::getInstance()->peekOp(driverId);
-    if (peekedOp == NULL)
+    if (peekedOp == nullptr)
     {
         return;
     }
 
-    if (peekedOp->opcode == 'K')
-    {
-        opcodeAbortCommand(driverId);
-    }
+    MotorOpcode opcode;
+    if (!try_parse_motor_opcode(peekedOp->opcode, &opcode)) return;
+    if (opcode != MotorOpcode::Abort) return;
+
+    CommandLayer::driver->setOpcodeContext(peekedOp->opSeq, driverId);
+    opcodeAbortCommand(driverId);
 }

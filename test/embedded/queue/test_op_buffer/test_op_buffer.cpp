@@ -1,17 +1,11 @@
-// Includes for unit test framework
-#include <Arduino.h>
 #include <unity.h>
-
-// Includes for project libraries
-#include <FS.h>
-#include <WiFi.h>
 
 // Includes for this unit test
 #include "OpBuffer.h"
 
 OpBuffer* _opBuffer = NULL;
-u_int8_t _bufferSize;
-u_int8_t _bufferCount;
+uint8_t _bufferSize;
+uint8_t _bufferCount;
 
 void setUp(void) {
     // set stuff up here
@@ -96,8 +90,6 @@ void add_buffer_pop_buffer(void){
     Op opIn(data);
     opIn.motorID = 0;
 
-    bool failing = false;
-
     TEST_ASSERT_TRUE(_opBuffer->storeOp(&opIn)>=0);
     TEST_ASSERT_NOT_NULL(_opBuffer->getOp(0));
     TEST_ASSERT_TRUE(_opBuffer->isEmpty(0));
@@ -179,9 +171,8 @@ void reset_opBuffer(void){
     TEST_ASSERT_FALSE_MESSAGE(failing, "Buffers not reset");
 }
 
-void setup()
+extern "C" void app_main(void)
 {
-    delay(2000); // service delay
     UNITY_BEGIN();
     RUN_TEST(setup_op_buffer);
     RUN_TEST(is_new_buffer_empty);
@@ -196,8 +187,4 @@ void setup()
     RUN_TEST(clear_buffer);
 
     UNITY_END(); // stop unit testing
-}
-
-void loop()
-{
 }
