@@ -171,12 +171,12 @@ void ServoDriver::writeServoAngle(uint8_t motorIndex, int angle)
 }
 
 /**
- * @brief Move a servo toward an absolute angle over the given rate.
- * @param targetAngle Desired absolute angle in driver units.
- * @param rate Transition rate (affects travel time calculation).
+ * @brief Move a servo toward an absolute target over the given rate.
+ * @param targetUnits Desired absolute target in servo driver units.
+ * @param rate Unsigned rate in servo driver units per second.
  * @param motorID One-based servo index.
  */
-void ServoDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID)
+void ServoDriver::motorGoTo(int32_t targetUnits, uint16_t rate, uint8_t motorID)
 {
     uint8_t motorIndex = 0;
     if (!resolve_motor_index(motorID, &motorIndex)) return;
@@ -189,7 +189,7 @@ void ServoDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID)
     motorDwell[motorIndex] = false;
     motorSleeping[motorIndex] = false;
     startAngle[motorIndex] = currentAngle[motorIndex];
-    commandDeltaAngle[motorIndex] = targetAngle - currentAngle[motorIndex];
+    commandDeltaAngle[motorIndex] = targetUnits - currentAngle[motorIndex];
     startTime[motorIndex] = esp_timer_get_time();
     commandDeltaTime[motorIndex] = 1000000 / rate * abs(commandDeltaAngle[motorIndex]);
 
@@ -201,11 +201,11 @@ void ServoDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID)
 
 /**
  * @brief Advance the servo by a delta from its current position.
- * @param targetAngle Delta to add to the current position.
- * @param rate Rate used for timing the transition.
+ * @param deltaUnits Delta to add in servo driver units.
+ * @param rate Unsigned rate in servo driver units per second.
  * @param motorID One-based servo index.
  */
-void ServoDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorID)
+void ServoDriver::motorMove(int32_t deltaUnits, uint16_t rate, uint8_t motorID)
 {
     uint8_t motorIndex = 0;
     if (!resolve_motor_index(motorID, &motorIndex)) return;
@@ -219,7 +219,7 @@ void ServoDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorID)
     motorDwell[motorIndex] = false;
     motorSleeping[motorIndex] = false;
     startAngle[motorIndex] = currentAngle[motorIndex];
-    commandDeltaAngle[motorIndex] = targetAngle;
+    commandDeltaAngle[motorIndex] = deltaUnits;
     startTime[motorIndex] = esp_timer_get_time();
     commandDeltaTime[motorIndex] = (1000000ULL * static_cast<uint64_t>(abs(commandDeltaAngle[motorIndex]))) / rate;
 

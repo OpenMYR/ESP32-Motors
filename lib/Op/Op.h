@@ -127,6 +127,7 @@ typedef struct Op {
     unsigned short port;
     char opcode;
     uint8_t queue;
+    // Legacy wire-format field names retained for compatibility across motion opcodes.
     int32_t stepNum;
     uint16_t stepRate;
     uint8_t motorID;

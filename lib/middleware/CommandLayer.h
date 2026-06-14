@@ -13,8 +13,8 @@ public:
     static CommandLayer *getInstance();
     static MotorDriver *driver;
     static void init();
-    static void opcodeMove(signed int step_num, unsigned short step_rate, uint8_t motor_id);
-    static void opcodeGoto(signed int step_num, unsigned short step_rate, uint8_t motor_id);
+    static void opcodeMove(signed int delta_units, unsigned short rate, uint8_t motor_id);
+    static void opcodeGoto(signed int target_units, unsigned short rate, uint8_t motor_id);
     static void opcodeStop(signed int wait_time, unsigned short interval_us, uint8_t motor_id);
     static void opcodeSleep(signed int wait_time, unsigned short precision, uint8_t motor_id);
     static void opcodeMotorSetting(MotorDriver::config_setting setting, uint32_t data1, uint32_t data2, uint8_t motor_id);

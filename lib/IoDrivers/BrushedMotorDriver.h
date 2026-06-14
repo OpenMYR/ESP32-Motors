@@ -18,8 +18,8 @@ public:
     bool isMotorRunning(uint8_t motor_id) override;
     void isrStartIoDriver() override;
     void isrStopIoDriver() override;
-    void motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID) override;
-    void motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorID) override;
+    void motorGoTo(int32_t targetUnits, uint16_t rate, uint8_t motorID) override;
+    void motorMove(int32_t deltaUnits, uint16_t rate, uint8_t motorID) override;
     void motorStop(signed int wait_time, unsigned short precision, uint8_t motorID) override;
     void motorSleep(signed int wait_time, unsigned short precision, uint8_t motorID) override;
     void setOpcodeContext(uint32_t op_seq, uint8_t motor_id) override;

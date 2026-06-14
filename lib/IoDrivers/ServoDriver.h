@@ -37,14 +37,14 @@ public:
     void isrStopIoDriver() override;
 
     /**
-     * @brief Command an absolute angle target for a servo.
+     * @brief Command an absolute target in servo driver units.
      */
-    void motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID) override;
+    void motorGoTo(int32_t targetUnits, uint16_t rate, uint8_t motorID) override;
 
     /**
-     * @brief Increment the servo angle by a delta value.
+     * @brief Increment the servo target by a delta in driver units.
      */
-    void motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID) override;
+    void motorMove(int32_t deltaUnits, uint16_t rate, uint8_t motorID) override;
 
     /**
      * @brief Pause the servo for the provided Stop duration.

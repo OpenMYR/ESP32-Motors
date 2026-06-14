@@ -54,12 +54,12 @@ public:
     /**
      * @brief Move a motor to an absolute target position.
      */
-    void motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID) override;
+    void motorGoTo(int32_t targetUnits, uint16_t rate, uint8_t motorID) override;
 
     /**
      * @brief Move a motor by a relative delta.
      */
-    void motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID) override;
+    void motorMove(int32_t deltaUnits, uint16_t rate, uint8_t motorID) override;
 
     /**
      * @brief Pause the motor for the provided Stop duration.

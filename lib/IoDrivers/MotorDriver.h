@@ -65,19 +65,21 @@ class MotorDriver
 
         /**
          * @brief Command an absolute position target.
-         * @param targetAngle Absolute goal.
-         * @param rate Rate used for timing.
+         * @param targetUnits Absolute goal in driver target units.
+         * @param rate Unsigned rate in driver target units per second.
          * @param motorID One-based motor identifier.
          */
-        virtual void motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID) = 0;
+        // TODO(CMD-R3.3): Add a versioned Goto API that accepts signed 64-bit targets and explicit
+        // target-unit rates once transport schemas expose full target precision.
+        virtual void motorGoTo(int32_t targetUnits, uint16_t rate, uint8_t motorID) = 0;
 
         /**
          * @brief Command a delta movement relative to the current position.
-         * @param deltaAngle Relative move.
-         * @param rate Rate used to time the move.
+         * @param deltaUnits Relative move in driver target units.
+         * @param rate Unsigned rate in driver target units per second.
          * @param motorID One-based motor identifier.
          */
-        virtual void motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID) = 0;
+        virtual void motorMove(int32_t deltaUnits, uint16_t rate, uint8_t motorID) = 0;
 
         /**
          * @brief Temporarily hold the motor for the provided duration.

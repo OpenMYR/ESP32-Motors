@@ -260,12 +260,12 @@ void StepperDriver::initMotorGpio()
 }
 
 /**
- * @brief Move a motor to an absolute angle at the requested rate, scheduling the required timeout.
- * @param targetAngle Absolute position goal in encoder units.
- * @param rate Requested speed for the motion.
+ * @brief Move a motor to an absolute target at the requested rate, scheduling the required timeout.
+ * @param targetUnits Absolute position goal in stepper driver units.
+ * @param rate Unsigned rate in stepper driver units per second.
  * @param motorID 1-based ID of the motor to command.
  */
-void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID)
+void StepperDriver::motorGoTo(int32_t targetUnits, uint16_t rate, uint8_t motorID)
 {
     uint8_t motorIndex = 0;
     if (!tryResolveMotorIndex(motorID, motorsControlled, motorIndex)) return;
@@ -284,7 +284,7 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
     }
 
     const int32_t currentStep = static_cast<int32_t>(currentAngle[motorIndex]);
-    const MotionPlan plan = planAbsoluteMove(currentStep, targetAngle, rate);
+    const MotionPlan plan = planAbsoluteMove(currentStep, targetUnits, rate);
 
     if (currentStep > plan.goalStep)
     {
@@ -345,12 +345,12 @@ void StepperDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorI
 }
 
 /**
- * @brief Shift a motor by a relative angle from its current position using the target rate.
- * @param targetAngle Angle delta to apply to the motor.
- * @param rate Requested speed for the motion.
+ * @brief Shift a motor by a relative delta from its current position using the target rate.
+ * @param deltaUnits Relative delta in stepper driver units.
+ * @param rate Unsigned rate in stepper driver units per second.
  * @param motorID 1-based ID of the motor to command.
  */
-void StepperDriver::motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID)
+void StepperDriver::motorMove(int32_t deltaUnits, uint16_t rate, uint8_t motorID)
 {
     uint8_t motorIndex = 0;
     if (!tryResolveMotorIndex(motorID, motorsControlled, motorIndex)) return;
@@ -358,7 +358,7 @@ void StepperDriver::motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID
     if (shouldRejectForEndstop(MotorOpcode::Move, isEndstopTripped(motorID))) return;
 
     const int32_t currentStep = static_cast<int32_t>(currentAngle[motorIndex]);
-    const int32_t goalStep = currentStep + deltaAngle;
+    const int32_t goalStep = currentStep + deltaUnits;
 
     // Keep a single execution path for motion scheduling/timing by routing relative moves through goto.
     motorGoTo(goalStep, rate, motorID);

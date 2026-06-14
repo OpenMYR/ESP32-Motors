@@ -32,18 +32,18 @@ void BrushedMotorDriver::isrStopIoDriver()
 {
 }
 
-void BrushedMotorDriver::motorGoTo(int32_t targetAngle, uint16_t rate, uint8_t motorID)
+void BrushedMotorDriver::motorGoTo(int32_t targetUnits, uint16_t rate, uint8_t motorID)
 {
     // FIXME: Brushed motor support has not been migrated to ESP-IDF yet.
-    (void)targetAngle;
+    (void)targetUnits;
     (void)rate;
     (void)motorID;
 }
 
-void BrushedMotorDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorID)
+void BrushedMotorDriver::motorMove(int32_t deltaUnits, uint16_t rate, uint8_t motorID)
 {
     // FIXME: Brushed motor support has not been migrated to ESP-IDF yet.
-    (void)targetAngle;
+    (void)deltaUnits;
     (void)rate;
     (void)motorID;
 }

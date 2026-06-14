@@ -47,14 +47,14 @@ CommandLayer *CommandLayer::getInstance()
     return instance;
 }
 
-void CommandLayer::opcodeMove(signed int step_num, unsigned short step_rate, uint8_t motor_id)
+void CommandLayer::opcodeMove(signed int delta_units, unsigned short rate, uint8_t motor_id)
 {
-    CommandLayer::driver->motorMove(step_num, step_rate, motor_id);
+    CommandLayer::driver->motorMove(delta_units, rate, motor_id);
 }
 
-void CommandLayer::opcodeGoto(signed int step_num, unsigned short step_rate, uint8_t motor_id)
+void CommandLayer::opcodeGoto(signed int target_units, unsigned short rate, uint8_t motor_id)
 {
-    CommandLayer::driver->motorGoTo(step_num, step_rate, motor_id);
+    CommandLayer::driver->motorGoTo(target_units, rate, motor_id);
 }
 
 void CommandLayer::opcodeStop(signed int wait_time, unsigned short interval_us, uint8_t motor_id)
