@@ -13,7 +13,7 @@ let motor1 = {
 };
 
 let vm = new VirtualMotor({
-		traverseSpeed : 12800,
+		traverseSpeed : 51200,
 		transmitInterval : 100,
 		motorPositions : [0]
 });

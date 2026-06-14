@@ -11,11 +11,28 @@ static void assert_uint64_equal(uint64_t expected, uint64_t actual, const char *
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(static_cast<uint32_t>(expected), static_cast<uint32_t>(actual), message);
 }
 
+static void assert_int64_equal(int64_t expected, int64_t actual, const char *message)
+{
+    TEST_ASSERT_TRUE_MESSAGE(expected == actual, message);
+}
+
 static void assert_motion_plan_equal(const StepperDriver::MotionPlan &expected, const StepperDriver::MotionPlan &actual, const char *message)
 {
     TEST_ASSERT_EQUAL_INT32_MESSAGE(expected.goalStep, actual.goalStep, message);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(expected.steps, actual.steps, message);
     assert_uint64_equal(expected.durationUs, actual.durationUs, message);
+}
+
+static void assert_microstep_motion_plan_equal(
+    const StepperDriver::MicrostepMotionPlan &expected,
+    const StepperDriver::MicrostepMotionPlan &actual,
+    const char *message)
+{
+    assert_int64_equal(expected.goalMicrosteps, actual.goalMicrosteps, message);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(expected.pulses, actual.pulses, message);
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(expected.pulseRateHz, actual.pulseRateHz, message);
+    assert_uint64_equal(expected.durationUs, actual.durationUs, message);
+    assert_int64_equal(expected.microstepUnitsPerPulse, actual.microstepUnitsPerPulse, message);
 }
 
 static void wait_for_monitor_attach(void)
@@ -41,6 +58,70 @@ void test_plan_relative_move_uses_delta_for_duration(void)
     TEST_ASSERT_EQUAL_INT32(231, plan.goalStep);
     TEST_ASSERT_EQUAL_UINT32(100, plan.steps);
     assert_uint64_equal(1000000ULL, plan.durationUs, "relative move duration");
+}
+
+void test_stepper_command_units_scale_to_internal_microsteps(void)
+{
+    assert_int64_equal(2560, StepperDriver::commandUnitsToMicrosteps(10, 1), "full-step command units");
+    assert_int64_equal(10, StepperDriver::commandUnitsToMicrosteps(10, 256), "finest microstep command units");
+    assert_int64_equal(-640, StepperDriver::commandUnitsToMicrosteps(-10, 4), "coarse microstep command units");
+}
+
+void test_microstep_absolute_move_uses_internal_full_step_units(void)
+{
+    StepperDriver::MicrostepMotionPlan expected = {};
+    expected.goalMicrosteps = 256;
+    expected.pulses = 1;
+    expected.pulseRateHz = 100;
+    expected.durationUs = 10000ULL;
+    expected.microstepUnitsPerPulse = 256;
+
+    const StepperDriver::MicrostepMotionPlan actual = StepperDriver::planAbsoluteMoveMicrosteps(0, 256, 100, 1);
+
+    assert_microstep_motion_plan_equal(expected, actual, "full-step internal-unit absolute plan");
+}
+
+void test_microstep_finest_mode_command_rate_is_pulse_rate(void)
+{
+    StepperDriver::MicrostepMotionPlan expected = {};
+    expected.goalMicrosteps = 256;
+    expected.pulses = 256;
+    expected.pulseRateHz = 51200;
+    expected.durationUs = 5000ULL;
+    expected.microstepUnitsPerPulse = 1;
+
+    const StepperDriver::MicrostepMotionPlan actual = StepperDriver::planAbsoluteMoveMicrosteps(0, 256, 51200, 256);
+
+    assert_microstep_motion_plan_equal(expected, actual, "finest microstep absolute plan");
+}
+
+void test_microstep_coarse_microstep_preserves_fractional_position_until_motion(void)
+{
+    StepperDriver::MicrostepMotionPlan expected = {};
+    expected.goalMicrosteps = 384;
+    expected.pulses = 1;
+    expected.pulseRateHz = 100;
+    expected.durationUs = 10000ULL;
+    expected.microstepUnitsPerPulse = 256;
+
+    const StepperDriver::MicrostepMotionPlan actual = StepperDriver::planRelativeMoveMicrosteps(128, 256, 100, 1);
+
+    assert_microstep_motion_plan_equal(expected, actual, "coarse microstep carry-forward plan");
+}
+
+void test_microstep_run_end_position_applies_pulse_size(void)
+{
+    assert_int64_equal(384, StepperDriver::computeRunEndPositionMicrosteps(128, true, 1, 256), "forward run end");
+    assert_int64_equal(-128, StepperDriver::computeRunEndPositionMicrosteps(128, false, 1, 256), "reverse run end");
+}
+
+void test_microstep_normalization(void)
+{
+    TEST_ASSERT_EQUAL_UINT16(1, StepperDriver::normalizeMicrostepsPerFullStep(0));
+    TEST_ASSERT_EQUAL_UINT16(256, StepperDriver::normalizeMicrostepsPerFullStep(256));
+    TEST_ASSERT_EQUAL_UINT16(1, StepperDriver::normalizeMicrostepsPerFullStep(3));
+    assert_int64_equal(1, StepperDriver::microstepUnitsPerPulse(256), "finest microstep units per pulse");
+    assert_int64_equal(256, StepperDriver::microstepUnitsPerPulse(1), "full-step units per pulse");
 }
 
 void test_plan_relative_move_handles_negative_delta(void)
@@ -233,6 +314,12 @@ extern "C" void app_main(void)
     wait_for_monitor_attach();
     UNITY_BEGIN();
     RUN_TEST(test_plan_relative_move_uses_delta_for_duration);
+    RUN_TEST(test_stepper_command_units_scale_to_internal_microsteps);
+    RUN_TEST(test_microstep_absolute_move_uses_internal_full_step_units);
+    RUN_TEST(test_microstep_finest_mode_command_rate_is_pulse_rate);
+    RUN_TEST(test_microstep_coarse_microstep_preserves_fractional_position_until_motion);
+    RUN_TEST(test_microstep_run_end_position_applies_pulse_size);
+    RUN_TEST(test_microstep_normalization);
     RUN_TEST(test_plan_relative_move_handles_negative_delta);
     RUN_TEST(test_plan_absolute_move_uses_distance_for_duration);
     RUN_TEST(test_plan_move_with_zero_rate_has_unknown_duration);

@@ -37,7 +37,7 @@ class ServoMotor {
 			let rawAngle = (Math.PI + Math.atan2(-dx, -dy)) * 180 / Math.PI;
 			if ((rawAngle >= this.motorArgs.minAngle) && (rawAngle <= this.motorArgs.maxAngle)) {
 				this.motorArgs.angle = rawAngle;
-				this.virtualMotor.updatePosition(this.motorArgs.motorid, this.motorArgs.angle);
+				this.virtualMotor.updatePosition(this.motorArgs.motorid, this.motorArgs.angle * 1000);
 			}
 			ServoMotor.drawHorn(this._hornContext, this.motorArgs);
 		}
@@ -60,7 +60,7 @@ class ServoMotor {
 			let rawAngle = (Math.PI + Math.atan2(-dx, -dy)) * 180 / Math.PI;
 			if ((rawAngle >= this.motorArgs.minAngle) && (rawAngle <= this.motorArgs.maxAngle)) {
 				this.motorArgs.angle = rawAngle;
-				this.virtualMotor.updatePosition(this.motorArgs.motorid, this.motorArgs.angle);
+				this.virtualMotor.updatePosition(this.motorArgs.motorid, this.motorArgs.angle * 1000);
 			}
 			ServoMotor.drawHorn(this._hornContext, this.motorArgs);
 		}
@@ -185,8 +185,8 @@ class ServoMotor {
 			data : [
 				motorNum,
 				0,
-				Math.round(angle),
-				1000
+				Math.round(angle * 1000),
+				50000
 			]
 		};
 		var out = {

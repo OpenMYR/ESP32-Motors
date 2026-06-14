@@ -69,8 +69,7 @@ class MotorDriver
          * @param rate Unsigned rate in driver target units per second.
          * @param motorID One-based motor identifier.
          */
-        // TODO(CMD-R3.3): Add a versioned Goto API that accepts signed 64-bit targets and explicit
-        // target-unit rates once transport schemas expose full target precision.
+        // TODO(CMD-R3.3): Add a wider Goto API once transports expose signed 64-bit stepper targets.
         virtual void motorGoTo(int32_t targetUnits, uint16_t rate, uint8_t motorID) = 0;
 
         /**

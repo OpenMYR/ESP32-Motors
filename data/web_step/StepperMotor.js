@@ -41,7 +41,7 @@ class StepperMotor {
 				delta += 360 * (-delta/Math.abs(delta));
 			}
 			this.motorArgs.angle += delta;
-			this.virtualMotor.updatePosition(this.motorArgs.motorid, this.motorArgs.angle/360*200*32);
+			this.virtualMotor.updatePosition(this.motorArgs.motorid, this.motorArgs.angle/360*200*256);
 			StepperMotor.drawHorn(this._hornContext, this.motorArgs);
 		}
 	}
@@ -67,7 +67,7 @@ class StepperMotor {
 				delta += 360 * (-delta/Math.abs(delta));
 			}
 			this.motorArgs.angle += delta;
-			this.virtualMotor.updatePosition(this.motorArgs.motorid, this.motorArgs.angle/360*200*32);
+			this.virtualMotor.updatePosition(this.motorArgs.motorid, this.motorArgs.angle/360*200*256);
 			StepperMotor.drawHorn(this._hornContext, this.motorArgs);
 		}
 	}
@@ -179,7 +179,7 @@ class StepperMotor {
 				motor1.motorid,
 				0,
 				0,
-				flag ? 1 : 0,
+				flag ? 256 : 1,
 			]
 		}]
 	};

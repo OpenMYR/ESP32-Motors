@@ -20,6 +20,8 @@
 class StepperDriver : public MotorDriver
 {
 public:
+    static constexpr int64_t kMicrostepUnitsPerFullStep = 256;
+
     struct MotionPlan
     {
         int32_t goalStep = 0;
@@ -27,13 +29,40 @@ public:
         uint64_t durationUs = 0;
     };
 
+    struct MicrostepMotionPlan
+    {
+        int64_t goalMicrosteps = 0;
+        uint32_t pulses = 0;
+        uint16_t pulseRateHz = 0;
+        uint64_t durationUs = 0;
+        int64_t microstepUnitsPerPulse = kMicrostepUnitsPerFullStep;
+    };
+
     static MotionPlan planRelativeMove(int32_t currentStep, int32_t deltaStep, uint16_t stepRate);
     static MotionPlan planAbsoluteMove(int32_t currentStep, int32_t targetStep, uint16_t stepRate);
+    static MicrostepMotionPlan planRelativeMoveMicrosteps(
+        int64_t currentMicrosteps,
+        int64_t deltaMicrosteps,
+        uint16_t rateUnitsPerSecond,
+        uint16_t microstepsPerFullStep);
+    static MicrostepMotionPlan planAbsoluteMoveMicrosteps(
+        int64_t currentMicrosteps,
+        int64_t targetMicrosteps,
+        uint16_t rateUnitsPerSecond,
+        uint16_t microstepsPerFullStep);
     static uint64_t planDwellDurationUs(int32_t waitCycles, uint16_t cycleRateHz);
     static bool shouldRejectForEndstop(MotorOpcode opcode, bool endstopTripped);
     static bool isCommandSequenceStale(uint32_t seq, uint32_t watermark);
     static int8_t findActiveRunOwner(uint32_t runSeq, const uint32_t *activeRunSeqs, uint8_t motorCount);
     static int32_t computeRunEndStep(int32_t startStep, bool directionForward, uint32_t pulsesCompleted);
+    static int64_t computeRunEndPositionMicrosteps(
+        int64_t startMicrosteps,
+        bool directionForward,
+        uint32_t pulsesCompleted,
+        int64_t microstepUnitsPerPulse);
+    static uint16_t normalizeMicrostepsPerFullStep(uint32_t requestedMicrosteps);
+    static int64_t microstepUnitsPerPulse(uint16_t microstepsPerFullStep);
+    static int64_t commandUnitsToMicrosteps(int32_t commandUnits, uint16_t microstepsPerFullStep);
 
     /** @brief Create the singleton and initialize GPIO. */
     StepperDriver();
@@ -120,6 +149,7 @@ private:
     void stopActiveCommandForEndstop();
     bool tryStartPendingPulse(uint8_t motorIndex);
     uint32_t consumePendingCommandSeq(uint8_t motorIndex);
+    void scheduleMotionToMicrosteps(uint8_t motorIndex, int64_t targetMicrosteps, uint16_t rateUnitsPerSecond, uint32_t acceptedCommandSeq);
 
     static StepperDriver *instance;
     CommandLayer *commandInstance;
@@ -154,6 +184,7 @@ private:
         uint64_t durationUs = 0;
         uint32_t runSeq = 0;
         bool directionForward = false;
+        int64_t microstepUnitsPerPulse = kMicrostepUnitsPerFullStep;
     };
 
     struct ActivePulseRunState
@@ -162,6 +193,7 @@ private:
         int8_t motorIndex = -1;
         uint32_t runSeq = 0;
         bool directionForward = false;
+        int64_t microstepUnitsPerPulse = kMicrostepUnitsPerFullStep;
     };
 
     stepper_conf confs[MAX_STEPPER_MOTORS];
@@ -169,14 +201,15 @@ private:
     bool motorSleeping = false;
 
     bool commandDone[MAX_STEPPER_MOTORS] = {1};
-    double currentAngle[MAX_STEPPER_MOTORS] = {0};  // angle is integer of steps in stepper driver.
-    double homeSoftAngle[MAX_STEPPER_MOTORS] = {0};  // 
-    double homeRealAngle[MAX_STEPPER_MOTORS] = {0};  // 
+    int64_t currentPositionMicrosteps[MAX_STEPPER_MOTORS] = {0};
+    int64_t homeSoftPositionMicrosteps[MAX_STEPPER_MOTORS] = {0};
+    int64_t homeRealPositionMicrosteps[MAX_STEPPER_MOTORS] = {0};
 
-    double startAngle[MAX_STEPPER_MOTORS] = {0};
-    double commandDeltaAngle[MAX_STEPPER_MOTORS] = {180};
+    int64_t startPositionMicrosteps[MAX_STEPPER_MOTORS] = {0};
+    int64_t commandTargetMicrosteps[MAX_STEPPER_MOTORS] = {0};
     uint64_t startTime[MAX_STEPPER_MOTORS] = {90};
     uint64_t commandDeltaTime[MAX_STEPPER_MOTORS] = {0};
+    uint16_t microstepsPerFullStep[MAX_STEPPER_MOTORS] = {0};
     PendingPulseRunState pendingRun[MAX_STEPPER_MOTORS] = {};
     CommandSequenceState commandSeq[MAX_STEPPER_MOTORS] = {};
     uint32_t activeRunSeq[MAX_STEPPER_MOTORS] = {0};

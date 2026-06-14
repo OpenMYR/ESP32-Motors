@@ -44,6 +44,13 @@ uint32_t steps_between(int32_t a, int32_t b) {
     return a >= b ? static_cast<uint32_t>(a - b) : static_cast<uint32_t>(b - a);
 }
 
+uint32_t pulses_between_microsteps(int64_t a, int64_t b, int64_t microstepUnitsPerPulse)
+{
+    const uint64_t distance = a >= b ? static_cast<uint64_t>(a - b) : static_cast<uint64_t>(b - a);
+    return static_cast<uint32_t>((distance + static_cast<uint64_t>(microstepUnitsPerPulse) - 1ULL) /
+                                 static_cast<uint64_t>(microstepUnitsPerPulse));
+}
+
 uint64_t timeout_grace_us(uint64_t scheduledWindowUs)
 {
     const uint64_t proportionalGrace = scheduledWindowUs / kCommandTimeoutGraceDivisor;
@@ -92,6 +99,7 @@ bool StepperDriver::tryStartPendingPulse(uint8_t motorIndex)
         activeRun.motorIndex = static_cast<int8_t>(motorIndex);
         activeRun.runSeq = pendingRun[motorIndex].runSeq;
         activeRun.directionForward = pendingRun[motorIndex].directionForward;
+        activeRun.microstepUnitsPerPulse = pendingRun[motorIndex].microstepUnitsPerPulse;
         pendingRun[motorIndex].startPending = false;
         return true;
     }
@@ -135,6 +143,10 @@ StepperDriver::StepperDriver() : MotorDriver()
     ESP_LOGV(TAG, "StepperDriver ctor");
     initMotorGpio();
     memset(commandDone, 1, MAX_STEPPER_MOTORS);
+    for (uint8_t i = 0; i < MAX_STEPPER_MOTORS; ++i)
+    {
+        microstepsPerFullStep[i] = 1;
+    }
 }
 
 /**
@@ -176,6 +188,48 @@ int32_t StepperDriver::computeRunEndStep(int32_t startStep, bool directionForwar
     return startStep + signedDelta;
 }
 
+int64_t StepperDriver::computeRunEndPositionMicrosteps(
+    int64_t startMicrosteps,
+    bool directionForward,
+    uint32_t pulsesCompleted,
+    int64_t microstepUnitsPerPulse)
+{
+    const int64_t signedDelta =
+        directionForward ? static_cast<int64_t>(pulsesCompleted) : -static_cast<int64_t>(pulsesCompleted);
+    return startMicrosteps + signedDelta * microstepUnitsPerPulse;
+}
+
+uint16_t StepperDriver::normalizeMicrostepsPerFullStep(uint32_t requestedMicrosteps)
+{
+    switch (requestedMicrosteps)
+    {
+    case 0:
+    case 1:
+        return 1;
+    case 2:
+    case 4:
+    case 8:
+    case 16:
+    case 32:
+    case 64:
+    case 128:
+    case 256:
+        return static_cast<uint16_t>(requestedMicrosteps);
+    default:
+        return 1;
+    }
+}
+
+int64_t StepperDriver::microstepUnitsPerPulse(uint16_t microstepsPerFullStep)
+{
+    return kMicrostepUnitsPerFullStep / normalizeMicrostepsPerFullStep(microstepsPerFullStep);
+}
+
+int64_t StepperDriver::commandUnitsToMicrosteps(int32_t commandUnits, uint16_t microstepsPerFullStep)
+{
+    return static_cast<int64_t>(commandUnits) * microstepUnitsPerPulse(microstepsPerFullStep);
+}
+
 StepperDriver::MotionPlan StepperDriver::planRelativeMove(int32_t currentStep, int32_t deltaStep, uint16_t stepRate)
 {
     MotionPlan plan = {};
@@ -203,6 +257,47 @@ StepperDriver::MotionPlan StepperDriver::planAbsoluteMove(int32_t currentStep, i
         return plan;
     }
     plan.durationUs = (static_cast<uint64_t>(plan.steps) * 1000000ULL) / static_cast<uint64_t>(stepRate);
+    return plan;
+}
+
+StepperDriver::MicrostepMotionPlan StepperDriver::planRelativeMoveMicrosteps(
+    int64_t currentMicrosteps,
+    int64_t deltaMicrosteps,
+    uint16_t rateUnitsPerSecond,
+    uint16_t microstepsPerFullStep)
+{
+    return planAbsoluteMoveMicrosteps(currentMicrosteps, currentMicrosteps + deltaMicrosteps, rateUnitsPerSecond, microstepsPerFullStep);
+}
+
+StepperDriver::MicrostepMotionPlan StepperDriver::planAbsoluteMoveMicrosteps(
+    int64_t currentMicrosteps,
+    int64_t targetMicrosteps,
+    uint16_t rateUnitsPerSecond,
+    uint16_t microstepsPerFullStep)
+{
+    MicrostepMotionPlan plan = {};
+    plan.microstepUnitsPerPulse = microstepUnitsPerPulse(microstepsPerFullStep);
+    plan.pulses = pulses_between_microsteps(currentMicrosteps, targetMicrosteps, plan.microstepUnitsPerPulse);
+    if (plan.pulses == 0)
+    {
+        plan.goalMicrosteps = currentMicrosteps;
+        return plan;
+    }
+
+    const bool directionForward = targetMicrosteps >= currentMicrosteps;
+    plan.goalMicrosteps = computeRunEndPositionMicrosteps(
+        currentMicrosteps,
+        directionForward,
+        plan.pulses,
+        plan.microstepUnitsPerPulse);
+
+    plan.pulseRateHz = rateUnitsPerSecond;
+    if (plan.pulseRateHz == 0)
+    {
+        plan.durationUs = UINT64_MAX;
+        return plan;
+    }
+    plan.durationUs = (static_cast<uint64_t>(plan.pulses) * 1000000ULL) / static_cast<uint64_t>(plan.pulseRateHz);
     return plan;
 }
 
@@ -261,8 +356,8 @@ void StepperDriver::initMotorGpio()
 
 /**
  * @brief Move a motor to an absolute target at the requested rate, scheduling the required timeout.
- * @param targetUnits Absolute position goal in stepper driver units.
- * @param rate Unsigned rate in stepper driver units per second.
+ * @param targetUnits Absolute position goal in current stepper command units.
+ * @param rate Unsigned rate in current stepper command units per second.
  * @param motorID 1-based ID of the motor to command.
  */
 void StepperDriver::motorGoTo(int32_t targetUnits, uint16_t rate, uint8_t motorID)
@@ -283,10 +378,17 @@ void StepperDriver::motorGoTo(int32_t targetUnits, uint16_t rate, uint8_t motorI
         return;
     }
 
-    const int32_t currentStep = static_cast<int32_t>(currentAngle[motorIndex]);
-    const MotionPlan plan = planAbsoluteMove(currentStep, targetUnits, rate);
+    const int64_t targetMicrosteps = commandUnitsToMicrosteps(targetUnits, microstepsPerFullStep[motorIndex]);
+    scheduleMotionToMicrosteps(motorIndex, targetMicrosteps, rate, acceptedCommandSeq);
+}
 
-    if (currentStep > plan.goalStep)
+void StepperDriver::scheduleMotionToMicrosteps(uint8_t motorIndex, int64_t targetMicrosteps, uint16_t rateUnitsPerSecond, uint32_t acceptedCommandSeq)
+{
+    const int64_t currentMicrosteps = currentPositionMicrosteps[motorIndex];
+    const MicrostepMotionPlan plan =
+        planAbsoluteMoveMicrosteps(currentMicrosteps, targetMicrosteps, rateUnitsPerSecond, microstepsPerFullStep[motorIndex]);
+
+    if (currentMicrosteps > plan.goalMicrosteps)
     {
         pendingRun[motorIndex].directionForward = !positiveDirection;
     }
@@ -302,15 +404,16 @@ void StepperDriver::motorGoTo(int32_t targetUnits, uint16_t rate, uint8_t motorI
 
     motorDwell[motorIndex] = false;
 
-    if (plan.steps > 0)
+    if (plan.pulses > 0)
     {
-        startAngle[motorIndex] = currentStep;
-        commandDeltaAngle[motorIndex] = plan.goalStep;
+        startPositionMicrosteps[motorIndex] = currentMicrosteps;
+        commandTargetMicrosteps[motorIndex] = plan.goalMicrosteps;
         commandDone[motorIndex] = false;
-        pendingRun[motorIndex].steps = plan.steps;
-        pendingRun[motorIndex].rateHz = rate;
+        pendingRun[motorIndex].steps = plan.pulses;
+        pendingRun[motorIndex].rateHz = plan.pulseRateHz;
         pendingRun[motorIndex].durationUs = plan.durationUs;
         pendingRun[motorIndex].runSeq = acceptedCommandSeq;
+        pendingRun[motorIndex].microstepUnitsPerPulse = plan.microstepUnitsPerPulse;
         pendingRun[motorIndex].startPending = true;
         commandDeltaTime[motorIndex] = UINT64_MAX;
         (void)tryStartPendingPulse(motorIndex);
@@ -318,23 +421,23 @@ void StepperDriver::motorGoTo(int32_t targetUnits, uint16_t rate, uint8_t motorI
         {
             ESP_LOGI(
                 TAG,
-                "Motion plan goto: motor=%u from=%ld to=%ld steps=%u rate=%u duration=unknown",
+                "Motion plan goto: motor=%u from=%lld to=%lld steps=%u rate=%u duration=unknown",
                 static_cast<unsigned>(motorIndex + 1),
-                static_cast<long>(currentStep),
-                static_cast<long>(plan.goalStep),
-                static_cast<unsigned>(plan.steps),
-                static_cast<unsigned>(rate));
+                static_cast<long long>(currentMicrosteps),
+                static_cast<long long>(plan.goalMicrosteps),
+                static_cast<unsigned>(plan.pulses),
+                static_cast<unsigned>(rateUnitsPerSecond));
         }
         else
         {
             ESP_LOGI(
                 TAG,
-                "Motion plan goto: motor=%u from=%ld to=%ld steps=%u rate=%u duration_ms=%llu",
+                "Motion plan goto: motor=%u from=%lld to=%lld steps=%u rate=%u duration_ms=%llu",
                 static_cast<unsigned>(motorIndex + 1),
-                static_cast<long>(currentStep),
-                static_cast<long>(plan.goalStep),
-                static_cast<unsigned>(plan.steps),
-                static_cast<unsigned>(rate),
+                static_cast<long long>(currentMicrosteps),
+                static_cast<long long>(plan.goalMicrosteps),
+                static_cast<unsigned>(plan.pulses),
+                static_cast<unsigned>(rateUnitsPerSecond),
                 static_cast<unsigned long long>(plan.durationUs / 1000ULL));
         }
     }
@@ -346,22 +449,28 @@ void StepperDriver::motorGoTo(int32_t targetUnits, uint16_t rate, uint8_t motorI
 
 /**
  * @brief Shift a motor by a relative delta from its current position using the target rate.
- * @param deltaUnits Relative delta in stepper driver units.
- * @param rate Unsigned rate in stepper driver units per second.
+ * @param deltaUnits Relative delta in current stepper command units.
+ * @param rate Unsigned rate in current stepper command units per second.
  * @param motorID 1-based ID of the motor to command.
  */
 void StepperDriver::motorMove(int32_t deltaUnits, uint16_t rate, uint8_t motorID)
 {
     uint8_t motorIndex = 0;
     if (!tryResolveMotorIndex(motorID, motorsControlled, motorIndex)) return;
+    const uint32_t acceptedCommandSeq = consumePendingCommandSeq(motorIndex);
+    if (isCommandSequenceStale(acceptedCommandSeq, commandSeq[motorIndex].staleCommandFenceSeq))
+    {
+        commandDone[motorIndex] = true;
+        pendingRun[motorIndex].startPending = false;
+        return;
+    }
+    commandSeq[motorIndex].activeCommandSeq = acceptedCommandSeq;
 
     if (shouldRejectForEndstop(MotorOpcode::Move, isEndstopTripped(motorID))) return;
 
-    const int32_t currentStep = static_cast<int32_t>(currentAngle[motorIndex]);
-    const int32_t goalStep = currentStep + deltaUnits;
-
-    // Keep a single execution path for motion scheduling/timing by routing relative moves through goto.
-    motorGoTo(goalStep, rate, motorID);
+    const int64_t deltaMicrosteps = commandUnitsToMicrosteps(deltaUnits, microstepsPerFullStep[motorIndex]);
+    const int64_t goalMicrosteps = currentPositionMicrosteps[motorIndex] + deltaMicrosteps;
+    scheduleMotionToMicrosteps(motorIndex, goalMicrosteps, rate, acceptedCommandSeq);
 }
 
 /**
@@ -613,14 +722,16 @@ void StepperDriver::applyPulseProgress(uint8_t motorIndex, uint32_t pulsesComple
 {
     if (motorIndex >= static_cast<uint8_t>(motorsControlled)) return;
 
-    const int32_t startStep = static_cast<int32_t>(startAngle[motorIndex]);
+    const int64_t startMicrosteps = startPositionMicrosteps[motorIndex];
     // Use the active run direction while a run owns the engine; otherwise fall back to the queued direction
     // that was latched for the most recent command on this motor.
     const bool directionForward =
         activeRun.motorIndex == static_cast<int8_t>(motorIndex) ? activeRun.directionForward : pendingRun[motorIndex].directionForward;
-    const int32_t endStep = computeRunEndStep(startStep, directionForward, pulsesCompleted);
-    if (motorIndex == 0) location = endStep;
-    currentAngle[motorIndex] = endStep;
+    const int64_t unitsPerPulse =
+        activeRun.motorIndex == static_cast<int8_t>(motorIndex) ? activeRun.microstepUnitsPerPulse : pendingRun[motorIndex].microstepUnitsPerPulse;
+    const int64_t endMicrosteps = computeRunEndPositionMicrosteps(startMicrosteps, directionForward, pulsesCompleted, unitsPerPulse);
+    if (motorIndex == 0) location = static_cast<int32_t>(endMicrosteps);
+    currentPositionMicrosteps[motorIndex] = endMicrosteps;
 }
 
 /**
@@ -705,13 +816,13 @@ void IRAM_ATTR StepperDriver::driver()
                         ESP_LOGE(TAG, "Command: Timed out");
                         ESP_LOGE(
                             TAG,
-                            "command: motorMove %d %d %u ",
-                            static_cast<int>(startAngle[i]),
-                            static_cast<int>(commandDeltaAngle[i]),
+                            "command: motorMove %lld %lld %u ",
+                            static_cast<long long>(startPositionMicrosteps[i]),
+                            static_cast<long long>(commandTargetMicrosteps[i]),
                             static_cast<unsigned int>(startTime[i]));
                         // #region FIXME(STEPPER-MISSED-STEP-TRACE): Temporary timeout diagnostics to quantify commanded-vs-completed pulse gap under load.
                         const uint32_t pulsesRequested =
-                            steps_between(static_cast<int32_t>(startAngle[i]), static_cast<int32_t>(commandDeltaAngle[i]));
+                            pulses_between_microsteps(startPositionMicrosteps[i], commandTargetMicrosteps[i], pendingRun[i].microstepUnitsPerPulse);
                         const uint32_t pulsesMissing = pulsesRequested > pulsesCompleted ? pulsesRequested - pulsesCompleted : 0;
                         if (pulsesMissing > 0)
                             ESP_LOGW(
@@ -787,8 +898,9 @@ void StepperDriver::changeMotorSettings(config_setting setting, uint32_t data1, 
     {
         // TODO(STEPPER-ABSTRACT-DRIVER): Future driver-IC-specific implementations should truncate the current
         // 1/256-full-step logical position to the nearest valid position when the next step is commanded.
-        gpio_set_level(static_cast<gpio_num_t>(GPIO_USTEP_MS2), data1 > 0);
-        gpio_set_level(static_cast<gpio_num_t>(GPIO_USTEP_MS1), data1 > 0);
+        microstepsPerFullStep[motorIndex] = normalizeMicrostepsPerFullStep(data1);
+        gpio_set_level(static_cast<gpio_num_t>(GPIO_USTEP_MS2), microstepsPerFullStep[motorIndex] > 1);
+        gpio_set_level(static_cast<gpio_num_t>(GPIO_USTEP_MS1), microstepsPerFullStep[motorIndex] > 1);
         ESP_LOGI(TAG, "changeMotorSettings %d %d %d ", data1, data2, motorIndex);
     }
 }

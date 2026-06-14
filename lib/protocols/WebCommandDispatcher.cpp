@@ -7,6 +7,7 @@
 #include "CommandParser.h"
 #include "Op.h"
 #include "cJSON.h"
+#include "config/Config.h"
 #include "esp_log.h"
 
 namespace {
@@ -75,7 +76,13 @@ esp_err_t handle_motor_motion_command(MotorOpcode opcode, cJSON *data)
     Op op = {};
     esp_err_t err = parse_motor_data(data, &op);
     if (err != ESP_OK) return err;
-    if (op.stepRate == 0 && opcode != MotorOpcode::Stop && opcode != MotorOpcode::Sleep) return ESP_ERR_INVALID_ARG;
+#if SERVO == 1
+    const bool zeroRateAllowed = opcode == MotorOpcode::Goto || opcode == MotorOpcode::Move;
+#else
+    const bool zeroRateAllowed = false;
+#endif
+    if (op.stepRate == 0 && opcode != MotorOpcode::Stop && opcode != MotorOpcode::Sleep && !zeroRateAllowed)
+        return ESP_ERR_INVALID_ARG;
 
     op.opcode = to_char(opcode);
     return CommandParser::processMotorOp(op);

@@ -40,7 +40,7 @@ void test_servo_inactive_on_init() {
 void test_servo_motorGoTo() {
     for (size_t i = 1; i <= MAX_MOTORS; i++)
     {
-        ServoDriver::getInstance()->motorGoTo(180,1,i);
+        ServoDriver::getInstance()->motorGoTo(180000, 50000, i);
         TEST_ASSERT_EQUAL(true, ServoDriver::getInstance()->isMotorRunning(i));
         ServoDriver::getInstance()->abortCommand(i);
 
@@ -50,7 +50,7 @@ void test_servo_motorGoTo() {
 void test_servo_motorGoTo_wait() {
     for (size_t i = 1; i <= MAX_MOTORS; i++)
     {
-        ServoDriver::getInstance()->motorGoTo(10,100,i);
+        ServoDriver::getInstance()->motorGoTo(10000, 50000, i);
         TEST_ASSERT_EQUAL(true, ServoDriver::getInstance()->isMotorRunning(i));
     }    
 
@@ -65,7 +65,7 @@ void test_servo_motorGoTo_wait() {
 void test_servo_motorMove() {
     for (size_t i = 1; i <= MAX_MOTORS; i++)
     {
-        ServoDriver::getInstance()->motorMove(-100,1,i);
+        ServoDriver::getInstance()->motorMove(-100000, 50000, i);
         TEST_ASSERT_EQUAL(true, ServoDriver::getInstance()->isMotorRunning(i));
         ServoDriver::getInstance()->abortCommand(i);
     }         
@@ -75,11 +75,22 @@ void test_servo_motorMove_negative_delta_finishes_after_expected_duration() {
     ServoDriver *driver = ServoDriver::getInstance();
 
     driver->abortCommand(1);
-    driver->motorMove(-10, 100, 1);
+    driver->motorMove(-10000, 50000, 1);
     TEST_ASSERT_EQUAL(true, driver->isMotorRunning(1));
 
     vTaskDelay(pdMS_TO_TICKS(250));
 
+    TEST_ASSERT_EQUAL(false, driver->isMotorRunning(1));
+}
+
+void test_servo_zero_rate_repositions_immediately() {
+    ServoDriver *driver = ServoDriver::getInstance();
+
+    driver->abortCommand(1);
+    driver->motorGoTo(90000, 0, 1);
+    TEST_ASSERT_EQUAL(false, driver->isMotorRunning(1));
+
+    driver->motorMove(10000, 0, 1);
     TEST_ASSERT_EQUAL(false, driver->isMotorRunning(1));
 }
 
@@ -150,6 +161,7 @@ extern "C" void app_main(void)
     RUN_TEST(test_servo_motorGoTo);
     RUN_TEST(test_servo_motorMove);
     RUN_TEST(test_servo_motorMove_negative_delta_finishes_after_expected_duration);
+    RUN_TEST(test_servo_zero_rate_repositions_immediately);
     RUN_TEST(test_servo_motorStop);
     RUN_TEST(test_servo_plan_stop_duration_uses_unsigned_interval_product);
     RUN_TEST(test_servo_plan_stop_duration_uses_negative_wait_magnitude);

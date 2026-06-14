@@ -195,8 +195,8 @@ function addSleep(motorid, queueFlag, time){
 	addCommand(motorid, "I", queueFlag, stepInputValue, stopCountsPerSecond);
 }
 function addMove(motorid, code, queueFlag, stepInputValue, stepRateInputValue){
-	stepInputValue = Math.round(stepInputValue);
-	stepRateInputValue = Math.round(stepRateInputValue);
+	stepInputValue = Math.round(stepInputValue * 1000);
+	stepRateInputValue = Math.round(stepRateInputValue * 1000);
 	addCommand(motorid, code, queueFlag, stepInputValue, stepRateInputValue);
 }
 function addCommand(motorid, code, queueFlag, stepInputValue, stepRateInputValue){

@@ -5,9 +5,9 @@ var motorParam = [];
 var motors = [];
 
 var vm = new VirtualMotor({
-	traverseSpeed : 500,
+	traverseSpeed : 50000,
 	transmitInterval : 50,
-	motorPositions : [90, 90, 90, 90]
+	motorPositions : [90000, 90000, 90000, 90000]
 });
 
 

@@ -24,7 +24,7 @@ var duration = document.getElementById("duration");
 var microSteppingCheckbox = document.getElementById("microStepCheckbox");
 //Motor constants
 var stepsPerRotation = 200;
-var microSteps = 32;
+var microSteps = 256;
 //predefines
 var maxSentCommands = 10;
 var buttonOpCode = ["M", "G", "S", "I"];
@@ -223,7 +223,7 @@ function checkMicroStep(motorid){
 	if (lastMicroStepping != isMicroStepping) {
 		var queueFlag = commandList.commands.length ? 1 : 0;
 		lastMicroStepping = isMicroStepping;
-		addCommand(motorid, "U", queueFlag, isMicroStepping ? 1 : 0, 0);
+		addCommand(motorid, "U", queueFlag, isMicroStepping ? 256 : 1, 0);
 	}
 }
 function addStop(motorid, time){

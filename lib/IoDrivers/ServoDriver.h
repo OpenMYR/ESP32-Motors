@@ -110,10 +110,10 @@ private:
     bool motorSleeping[MAX_MOTORS] = {0};
 
     bool commandDone[MAX_MOTORS] = {1};
-    uint16_t currentAngle[MAX_MOTORS] = {0};
+    int32_t currentAngleMillideg[MAX_MOTORS] = {0};
 
-    uint16_t startAngle[MAX_MOTORS] = {0};
-    int16_t commandDeltaAngle[MAX_MOTORS] = {180};
+    int32_t startAngleMillideg[MAX_MOTORS] = {0};
+    int32_t commandDeltaAngleMillideg[MAX_MOTORS] = {0};
     uint64_t startTime[MAX_MOTORS] = {90};
     uint64_t commandDeltaTime[MAX_MOTORS] = {0};
     bool pwmAttached[MAX_MOTORS] = {0};
@@ -121,7 +121,7 @@ private:
     bool isValidOpCode(Op *);
     void attachPwmChannel(uint8_t motorIndex);
     void detachPwmChannel(uint8_t motorIndex);
-    void writeServoAngle(uint8_t motorIndex, int angle);
+    void writeServoAngleMillideg(uint8_t motorIndex, int32_t angleMillideg);
 
     /**
      * @brief Fetch the next queued command from the command layer.

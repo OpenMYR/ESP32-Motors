@@ -236,12 +236,16 @@ void test_stop_command_queue_zero_inserts_kill_before_dispatch(void)
     TEST_ASSERT_EQUAL_UINT8(1, gFakeDriver.lastMotorId);
 }
 
-void test_motion_command_rejects_zero_step_rate(void)
+void test_motion_command_accepts_zero_rate_for_immediate_servo_reposition(void)
 {
     const char *payload = "{\"commands\":[{\"code\":\"M\",\"data\":[1,1,250,0]}]}";
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, WebCommandDispatcher::processPayload(payload));
-    TEST_ASSERT_TRUE(OpBuffer::getInstance()->isEmpty(1));
-    TEST_ASSERT_FALSE(gFakeDriver.moveCalled);
+    TEST_ASSERT_EQUAL(ESP_OK, WebCommandDispatcher::processPayload(payload));
+
+    CommandLayer::getNextOp(1);
+    TEST_ASSERT_TRUE(gFakeDriver.moveCalled);
+    TEST_ASSERT_EQUAL_INT32(250, gFakeDriver.lastStepNum);
+    TEST_ASSERT_EQUAL_UINT16(0, gFakeDriver.lastStepRate);
+    TEST_ASSERT_EQUAL_UINT8(1, gFakeDriver.lastMotorId);
     TEST_ASSERT_FALSE(gFakeDriver.gotoCalled);
     TEST_ASSERT_FALSE(gFakeDriver.stopCalled);
     TEST_ASSERT_FALSE(gFakeDriver.sleepCalled);
@@ -437,7 +441,7 @@ extern "C" void app_main(void)
     RUN_TEST(test_sleep_command_payload_dispatches_wait_and_precision);
     RUN_TEST(test_sleep_command_payload_maps_to_expected_dwell_duration);
     RUN_TEST(test_stop_command_queue_zero_inserts_kill_before_dispatch);
-    RUN_TEST(test_motion_command_rejects_zero_step_rate);
+    RUN_TEST(test_motion_command_accepts_zero_rate_for_immediate_servo_reposition);
     RUN_TEST(test_sequence_u_g_i_g_dispatch_order_is_preserved);
     RUN_TEST(test_sequence_u_g_i_g_dispatch_order_is_preserved_under_concurrent_drain);
     RUN_TEST(test_sequence_g_sssss_g_queue_duration_totals_2p05_seconds);

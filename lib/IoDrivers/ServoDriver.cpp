@@ -26,6 +26,8 @@ constexpr uint32_t kServoPeriodUs = 1000000UL / kServoPwmFrequencyHz;
 constexpr uint32_t kServoMinPulseUs = 500;
 constexpr uint32_t kServoMaxPulseUs = 2400;
 constexpr uint32_t kServoAngleMax = 180;
+constexpr int32_t kMillidegreesPerDegree = 1000;
+constexpr int32_t kServoAngleMaxMillideg = static_cast<int32_t>(kServoAngleMax) * kMillidegreesPerDegree;
 constexpr uint32_t kServoDutyMax = (1UL << 16) - 1UL;
 constexpr gpio_num_t kServoPins[MAX_MOTORS] = {
     GPIO_NUM_32, GPIO_NUM_33, GPIO_NUM_25, GPIO_NUM_26, GPIO_NUM_27,
@@ -65,12 +67,20 @@ ServoPwmChannelConfig resolve_pwm_channel(uint8_t motorIndex)
     };
 }
 
-uint32_t angle_to_pulse_width_us(int angle)
+uint64_t servo_move_duration_us(int32_t deltaMillideg, uint16_t rateMillidegPerSecond)
 {
-    const int clampedAngle = std::clamp(angle, 0, static_cast<int>(kServoAngleMax));
+    if (rateMillidegPerSecond == 0) return UINT64_MAX;
+    const int64_t delta = static_cast<int64_t>(deltaMillideg);
+    const uint64_t magnitude = delta >= 0 ? static_cast<uint64_t>(delta) : static_cast<uint64_t>(-delta);
+    return (1000000ULL * magnitude) / static_cast<uint64_t>(rateMillidegPerSecond);
+}
+
+uint32_t angle_millidegrees_to_pulse_width_us(int32_t angleMillideg)
+{
+    const int32_t clampedAngle = std::clamp(angleMillideg, static_cast<int32_t>(0), kServoAngleMaxMillideg);
     const uint32_t spanUs = kServoMaxPulseUs - kServoMinPulseUs;
     return kServoMinPulseUs +
-           (static_cast<uint32_t>(clampedAngle) * spanUs) / kServoAngleMax;
+           (static_cast<uint32_t>(clampedAngle) * spanUs) / static_cast<uint32_t>(kServoAngleMaxMillideg);
 }
 
 uint32_t pulse_width_us_to_duty(uint32_t pulseWidthUs)
@@ -159,21 +169,21 @@ void ServoDriver::detachPwmChannel(uint8_t motorIndex)
     pwmAttached[motorIndex] = false;
 }
 
-void ServoDriver::writeServoAngle(uint8_t motorIndex, int angle)
+void ServoDriver::writeServoAngleMillideg(uint8_t motorIndex, int32_t angleMillideg)
 {
     if (motorIndex >= MAX_MOTORS) return;
     if (!pwmAttached[motorIndex]) attachPwmChannel(motorIndex);
 
     const ServoPwmChannelConfig pwm = resolve_pwm_channel(motorIndex);
-    const uint32_t duty = pulse_width_us_to_duty(angle_to_pulse_width_us(angle));
+    const uint32_t duty = pulse_width_us_to_duty(angle_millidegrees_to_pulse_width_us(angleMillideg));
     if (ledc_set_duty(pwm.speedMode, pwm.channel, duty) != ESP_OK) return;
     if (ledc_update_duty(pwm.speedMode, pwm.channel) != ESP_OK) return;
 }
 
 /**
  * @brief Move a servo toward an absolute target over the given rate.
- * @param targetUnits Desired absolute target in servo driver units.
- * @param rate Unsigned rate in servo driver units per second.
+ * @param targetUnits Desired absolute target in millidegrees.
+ * @param rate Unsigned rate in millidegrees per second.
  * @param motorID One-based servo index.
  */
 void ServoDriver::motorGoTo(int32_t targetUnits, uint16_t rate, uint8_t motorID)
@@ -188,28 +198,38 @@ void ServoDriver::motorGoTo(int32_t targetUnits, uint16_t rate, uint8_t motorID)
 
     motorDwell[motorIndex] = false;
     motorSleeping[motorIndex] = false;
-    startAngle[motorIndex] = currentAngle[motorIndex];
-    commandDeltaAngle[motorIndex] = targetUnits - currentAngle[motorIndex];
+    startAngleMillideg[motorIndex] = currentAngleMillideg[motorIndex];
+    commandDeltaAngleMillideg[motorIndex] = targetUnits - currentAngleMillideg[motorIndex];
     startTime[motorIndex] = esp_timer_get_time();
-    commandDeltaTime[motorIndex] = 1000000 / rate * abs(commandDeltaAngle[motorIndex]);
+    commandDeltaTime[motorIndex] = servo_move_duration_us(commandDeltaAngleMillideg[motorIndex], rate);
 
-    commandDone[motorIndex] = false;
-    ESP_LOGV(TAG, "command %d %d %llu %llu ", startAngle[motorIndex], commandDeltaAngle[motorIndex],
+    if (rate == 0)
+    {
+        writeServoAngleMillideg(motorIndex, targetUnits);
+        currentAngleMillideg[motorIndex] = targetUnits;
+        commandDone[motorIndex] = true;
+    }
+    else
+    {
+        commandDone[motorIndex] = false;
+    }
+    ESP_LOGV(TAG, "command %ld %ld %llu %llu ",
+             static_cast<long>(startAngleMillideg[motorIndex]),
+             static_cast<long>(commandDeltaAngleMillideg[motorIndex]),
              static_cast<unsigned long long>(startTime[motorIndex]),
              static_cast<unsigned long long>(commandDeltaTime[motorIndex]));
 }
 
 /**
  * @brief Advance the servo by a delta from its current position.
- * @param deltaUnits Delta to add in servo driver units.
- * @param rate Unsigned rate in servo driver units per second.
+ * @param deltaUnits Delta to add in millidegrees.
+ * @param rate Unsigned rate in millidegrees per second.
  * @param motorID One-based servo index.
  */
 void ServoDriver::motorMove(int32_t deltaUnits, uint16_t rate, uint8_t motorID)
 {
     uint8_t motorIndex = 0;
     if (!resolve_motor_index(motorID, &motorIndex)) return;
-    if (rate == 0) return;
 
     if(motorSleeping[motorIndex]){
         motorSleeping[motorIndex] = false;
@@ -218,13 +238,25 @@ void ServoDriver::motorMove(int32_t deltaUnits, uint16_t rate, uint8_t motorID)
 
     motorDwell[motorIndex] = false;
     motorSleeping[motorIndex] = false;
-    startAngle[motorIndex] = currentAngle[motorIndex];
-    commandDeltaAngle[motorIndex] = deltaUnits;
+    startAngleMillideg[motorIndex] = currentAngleMillideg[motorIndex];
+    commandDeltaAngleMillideg[motorIndex] = deltaUnits;
     startTime[motorIndex] = esp_timer_get_time();
-    commandDeltaTime[motorIndex] = (1000000ULL * static_cast<uint64_t>(abs(commandDeltaAngle[motorIndex]))) / rate;
+    commandDeltaTime[motorIndex] = servo_move_duration_us(commandDeltaAngleMillideg[motorIndex], rate);
 
-    commandDone[motorIndex] = false;
-    ESP_LOGV(TAG, "command %d %d %llu %llu ", startAngle[motorIndex], commandDeltaAngle[motorIndex],
+    if (rate == 0)
+    {
+        const int32_t targetAngleMillideg = startAngleMillideg[motorIndex] + commandDeltaAngleMillideg[motorIndex];
+        writeServoAngleMillideg(motorIndex, targetAngleMillideg);
+        currentAngleMillideg[motorIndex] = targetAngleMillideg;
+        commandDone[motorIndex] = true;
+    }
+    else
+    {
+        commandDone[motorIndex] = false;
+    }
+    ESP_LOGV(TAG, "command %ld %ld %llu %llu ",
+             static_cast<long>(startAngleMillideg[motorIndex]),
+             static_cast<long>(commandDeltaAngleMillideg[motorIndex]),
              static_cast<unsigned long long>(startTime[motorIndex]),
              static_cast<unsigned long long>(commandDeltaTime[motorIndex]));
 }
@@ -253,7 +285,9 @@ void ServoDriver::motorStop(signed int wait_time, unsigned short interval_us, ui
     commandDeltaTime[motorIndex] = MotorDriver::planStopDurationUs(wait_time, interval_us);
     commandDone[motorIndex] = false;
 
-    ESP_LOGV(TAG, "command %d %d %llu %llu ", startAngle[motorIndex], commandDeltaAngle[motorIndex],
+    ESP_LOGV(TAG, "command %ld %ld %llu %llu ",
+             static_cast<long>(startAngleMillideg[motorIndex]),
+             static_cast<long>(commandDeltaAngleMillideg[motorIndex]),
              static_cast<unsigned long long>(startTime[motorIndex]),
              static_cast<unsigned long long>(commandDeltaTime[motorIndex]));
 }
@@ -279,7 +313,9 @@ void ServoDriver::motorSleep(signed int wait_time, unsigned short precision, uin
 
     detachPwmChannel(motorIndex);
 
-    ESP_LOGV(TAG, "command %d %d %llu %llu ", startAngle[motorIndex], commandDeltaAngle[motorIndex],
+    ESP_LOGV(TAG, "command %ld %ld %llu %llu ",
+             static_cast<long>(startAngleMillideg[motorIndex]),
+             static_cast<long>(commandDeltaAngleMillideg[motorIndex]),
              static_cast<unsigned long long>(startTime[motorIndex]),
              static_cast<unsigned long long>(commandDeltaTime[motorIndex]));
 }
@@ -401,18 +437,21 @@ void IRAM_ATTR ServoDriver::driver()
                 }
                 else
                 {
-                    int angle;
+                    int32_t angleMillideg;
                     if (delta < commandDeltaTime[i])
                     {
-                        angle = (float)delta / commandDeltaTime[i] * commandDeltaAngle[i] + startAngle[i];
+                        angleMillideg = static_cast<int32_t>(
+                            startAngleMillideg[i] +
+                            (static_cast<int64_t>(delta) * static_cast<int64_t>(commandDeltaAngleMillideg[i])) /
+                                static_cast<int64_t>(commandDeltaTime[i]));
                     }
                     else
                     {
-                        angle = commandDeltaAngle[i] + startAngle[i];
+                        angleMillideg = commandDeltaAngleMillideg[i] + startAngleMillideg[i];
                         commandDone[i] = true;
                     }
-                    writeServoAngle(static_cast<uint8_t>(i), angle);
-                    currentAngle[i] = angle;
+                    writeServoAngleMillideg(static_cast<uint8_t>(i), angleMillideg);
+                    currentAngleMillideg[i] = angleMillideg;
                 }
                 if (sPeekTicks == 0)
                 {
