@@ -231,14 +231,14 @@ void ServoDriver::motorMove(int32_t targetAngle, uint16_t rate, uint8_t motorID)
 
 /**
  * @brief Pause the servo for a duration before resuming command processing.
- * @param wait_time Number of wait cycles.
- * @param precision Duration of each cycle in milliseconds.
+ * @param wait_time Signed legacy wait count.
+ * @param interval_us Duration of each wait count in microseconds.
  * @param motorID One-based servo index.
  */
-void ServoDriver::motorStop(signed int wait_time, unsigned short precision, uint8_t motorID)
+void ServoDriver::motorStop(signed int wait_time, unsigned short interval_us, uint8_t motorID)
 {
     // wait_time, cycles to wait
-    // precision, duration of wait cycle in milliseconds
+    // interval_us, microseconds per wait count
     uint8_t motorIndex = 0;
     if (!resolve_motor_index(motorID, &motorIndex)) return;
 
@@ -250,7 +250,7 @@ void ServoDriver::motorStop(signed int wait_time, unsigned short precision, uint
     motorDwell[motorIndex] = true;
     motorSleeping[motorIndex] = false;
     startTime[motorIndex] = esp_timer_get_time();
-    commandDeltaTime[motorIndex] = (abs(wait_time) * precision);
+    commandDeltaTime[motorIndex] = MotorDriver::planStopDurationUs(wait_time, interval_us);
     commandDone[motorIndex] = false;
 
     ESP_LOGV(TAG, "command %d %d %llu %llu ", startAngle[motorIndex], commandDeltaAngle[motorIndex],
@@ -261,13 +261,13 @@ void ServoDriver::motorStop(signed int wait_time, unsigned short precision, uint
 /**
  * @brief Stop the servo and detach it to allow the motor to relax.
  * @param wait_time Number of wait cycles.
- * @param precision Duration of each cycle in milliseconds.
+ * @param precision Duration of each sleep wait cycle in microseconds.
  * @param motorID One-based servo index.
  */
 void ServoDriver::motorSleep(signed int wait_time, unsigned short precision, uint8_t motorID)
 {
     // wait_time, cycles to wait
-    // precision, duration of wait cycle in milliseconds
+    // precision, microseconds per sleep wait cycle
     uint8_t motorIndex = 0;
     if (!resolve_motor_index(motorID, &motorIndex)) return;
 

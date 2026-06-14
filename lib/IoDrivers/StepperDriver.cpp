@@ -366,14 +366,14 @@ void StepperDriver::motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID
 
 /**
  * @brief Hold the motor in place for a number of wait cycles before resuming.
- * @param wait_time Number of cycles to wait.
- * @param precision Wait cycles per second.
+ * @param wait_time Signed legacy wait count.
+ * @param interval_us Duration of each wait count in microseconds.
  * @param motorID 1-based ID of the motor to command.
  */
-void StepperDriver::motorStop(signed int wait_time, unsigned short precision, uint8_t motorID)
+void StepperDriver::motorStop(signed int wait_time, unsigned short interval_us, uint8_t motorID)
 {
     // wait_time, cycles to wait
-    // precision, wait cycles per second
+    // interval_us, microseconds per wait count
     uint8_t motorIndex = 0;
     if (!tryResolveMotorIndex(motorID, motorsControlled, motorIndex)) return;
     const uint32_t acceptedCommandSeq = consumePendingCommandSeq(motorIndex);
@@ -392,7 +392,7 @@ void StepperDriver::motorStop(signed int wait_time, unsigned short precision, ui
 
     motorDwell[motorIndex] = true;
     startTime[motorIndex] = esp_timer_get_time();
-    const uint64_t dwellDurationUs = planDwellDurationUs(wait_time, precision);
+    const uint64_t dwellDurationUs = MotorDriver::planStopDurationUs(wait_time, interval_us);
     commandDeltaTime[motorIndex] = startTime[motorIndex] + dwellDurationUs;
     commandDone[motorIndex] = false;
     pendingRun[motorIndex].startPending = false;
@@ -785,6 +785,8 @@ void StepperDriver::changeMotorSettings(config_setting setting, uint32_t data1, 
 
     if (setting == config_setting::MICROSTEPPING)
     {
+        // TODO(STEPPER-ABSTRACT-DRIVER): Future driver-IC-specific implementations should truncate the current
+        // 1/256-full-step logical position to the nearest valid position when the next step is commanded.
         gpio_set_level(static_cast<gpio_num_t>(GPIO_USTEP_MS2), data1 > 0);
         gpio_set_level(static_cast<gpio_num_t>(GPIO_USTEP_MS1), data1 > 0);
         ESP_LOGI(TAG, "changeMotorSettings %d %d %d ", data1, data2, motorIndex);

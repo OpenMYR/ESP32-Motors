@@ -322,15 +322,15 @@ void test_sequence_m_sssss_m_queue_duration_totals_2p05_seconds(void)
     const uint64_t moveOneUs =
         StepperDriver::planRelativeMove(0, gFakeDriver.callStepNum[0], gFakeDriver.callStepRate[0]).durationUs;
     const uint64_t stopOneUs =
-        StepperDriver::planDwellDurationUs(gFakeDriver.callStepNum[1], gFakeDriver.callStepRate[1]);
+        MotorDriver::planStopDurationUs(gFakeDriver.callStepNum[1], gFakeDriver.callStepRate[1]);
     const uint64_t stopTwoUs =
-        StepperDriver::planDwellDurationUs(gFakeDriver.callStepNum[2], gFakeDriver.callStepRate[2]);
+        MotorDriver::planStopDurationUs(gFakeDriver.callStepNum[2], gFakeDriver.callStepRate[2]);
     const uint64_t stopThreeUs =
-        StepperDriver::planDwellDurationUs(gFakeDriver.callStepNum[3], gFakeDriver.callStepRate[3]);
+        MotorDriver::planStopDurationUs(gFakeDriver.callStepNum[3], gFakeDriver.callStepRate[3]);
     const uint64_t stopFourUs =
-        StepperDriver::planDwellDurationUs(gFakeDriver.callStepNum[4], gFakeDriver.callStepRate[4]);
+        MotorDriver::planStopDurationUs(gFakeDriver.callStepNum[4], gFakeDriver.callStepRate[4]);
     const uint64_t stopFiveUs =
-        StepperDriver::planDwellDurationUs(gFakeDriver.callStepNum[5], gFakeDriver.callStepRate[5]);
+        MotorDriver::planStopDurationUs(gFakeDriver.callStepNum[5], gFakeDriver.callStepRate[5]);
     const uint64_t moveTwoUs =
         StepperDriver::planRelativeMove(gFakeDriver.callStepNum[0], gFakeDriver.callStepNum[6], gFakeDriver.callStepRate[6]).durationUs;
     const uint64_t totalUs = moveOneUs + stopOneUs + stopTwoUs + stopThreeUs + stopFourUs + stopFiveUs + moveTwoUs;

@@ -57,9 +57,9 @@ void CommandLayer::opcodeGoto(signed int step_num, unsigned short step_rate, uin
     CommandLayer::driver->motorGoTo(step_num, step_rate, motor_id);
 }
 
-void CommandLayer::opcodeStop(signed int wait_time, unsigned short precision, uint8_t motor_id)
+void CommandLayer::opcodeStop(signed int wait_time, unsigned short interval_us, uint8_t motor_id)
 {
-    CommandLayer::driver->motorStop(wait_time, precision, motor_id);
+    CommandLayer::driver->motorStop(wait_time, interval_us, motor_id);
 }
 
 void CommandLayer::opcodeSleep(signed int step_num, unsigned short step_rate, uint8_t motor_id)

@@ -62,9 +62,9 @@ public:
     void motorMove(int32_t deltaAngle, uint16_t rate, uint8_t motorID) override;
 
     /**
-     * @brief Pause the motor for the provided wait cycles.
+     * @brief Pause the motor for the provided Stop duration.
      */
-    void motorStop(signed int wait_time, unsigned short precision, uint8_t motorID) override;
+    void motorStop(signed int wait_time, unsigned short interval_us, uint8_t motorID) override;
 
     /**
      * @brief Put the motor to sleep for the wait duration.

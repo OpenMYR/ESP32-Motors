@@ -23,6 +23,13 @@ class MotorDriver
         {
         };
 
+        static uint64_t planStopDurationUs(int32_t waitCount, uint16_t intervalUs)
+        {
+            const uint64_t magnitude =
+                waitCount >= 0 ? static_cast<uint64_t>(waitCount) : static_cast<uint64_t>(-(static_cast<int64_t>(waitCount)));
+            return magnitude * static_cast<uint64_t>(intervalUs);
+        }
+
         enum config_setting
         {
             MIN_SERVO_BOUND,
@@ -74,16 +81,16 @@ class MotorDriver
 
         /**
          * @brief Temporarily hold the motor for the provided duration.
-         * @param wait_time Number of cycles to wait.
-         * @param precision Cycle duration in milliseconds.
+         * @param wait_time Signed legacy wait count.
+         * @param interval_us Duration of each wait count in microseconds for Stop.
          * @param motor_id One-based motor identifier.
          */
-        virtual void motorStop(signed int wait_time, unsigned short precision, uint8_t motor_id) = 0;
+        virtual void motorStop(signed int wait_time, unsigned short interval_us, uint8_t motor_id) = 0;
 
         /**
          * @brief Put the motor into a sleep state after the wait duration.
          * @param wait_time Number of cycles to wait before sleeping.
-         * @param precision Cycle duration in milliseconds.
+         * @param precision Driver-specific sleep timing field.
          * @param motor_id One-based motor identifier.
          */
         virtual void motorSleep(signed int wait_time, unsigned short precision, uint8_t motor_id) = 0;

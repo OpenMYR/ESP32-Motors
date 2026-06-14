@@ -120,6 +120,36 @@ void test_plan_dwell_duration_uses_rate_per_second(void)
     assert_uint64_equal(5000000ULL, duration, "dwell duration from cycles per second");
 }
 
+void test_plan_stop_duration_uses_unsigned_interval_product(void)
+{
+    const uint64_t duration = MotorDriver::planStopDurationUs(10, 1000);
+    assert_uint64_equal(10000ULL, duration, "Stop duration from interval");
+}
+
+void test_plan_stop_duration_uses_negative_wait_magnitude(void)
+{
+    const uint64_t duration = MotorDriver::planStopDurationUs(-2, 1250);
+    assert_uint64_equal(2500ULL, duration, "negative Stop wait count");
+}
+
+void test_plan_stop_duration_zero_interval_completes_immediately(void)
+{
+    const uint64_t duration = MotorDriver::planStopDurationUs(INT32_MAX, 0);
+    assert_uint64_equal(0, duration, "zero Stop interval");
+}
+
+void test_plan_stop_duration_handles_positive_max(void)
+{
+    const uint64_t duration = MotorDriver::planStopDurationUs(INT32_MAX, UINT16_MAX);
+    assert_uint64_equal(140735340806145ULL, duration, "positive max Stop duration");
+}
+
+void test_plan_stop_duration_handles_int32_min_magnitude(void)
+{
+    const uint64_t duration = MotorDriver::planStopDurationUs(INT32_MIN, UINT16_MAX);
+    assert_uint64_equal(140735340871680ULL, duration, "INT32_MIN Stop duration");
+}
+
 void test_find_active_pulse_owner_returns_matching_motor_index(void)
 {
     const uint32_t activeTokens[MAX_STEPPER_MOTORS] = {0, 42, 77};
@@ -211,6 +241,11 @@ extern "C" void app_main(void)
     RUN_TEST(test_plan_relative_zero_delta_matches_absolute_path);
     RUN_TEST(test_plan_relative_zero_delta_zero_rate_stays_zero_duration);
     RUN_TEST(test_plan_dwell_duration_uses_rate_per_second);
+    RUN_TEST(test_plan_stop_duration_uses_unsigned_interval_product);
+    RUN_TEST(test_plan_stop_duration_uses_negative_wait_magnitude);
+    RUN_TEST(test_plan_stop_duration_zero_interval_completes_immediately);
+    RUN_TEST(test_plan_stop_duration_handles_positive_max);
+    RUN_TEST(test_plan_stop_duration_handles_int32_min_magnitude);
     RUN_TEST(test_find_active_pulse_owner_returns_matching_motor_index);
     RUN_TEST(test_find_active_pulse_owner_rejects_zero_and_unknown_tokens);
     RUN_TEST(test_opcode_sequence_stale_matches_abort_watermark_contract);

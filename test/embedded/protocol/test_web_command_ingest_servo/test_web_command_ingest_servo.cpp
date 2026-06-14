@@ -24,7 +24,7 @@ uint64_t servo_goto_duration_us(int32_t currentAngle, int32_t targetAngle, uint1
     return (magnitude * 1000000ULL) / static_cast<uint64_t>(rate);
 }
 
-uint64_t servo_dwell_duration_us(int32_t waitCycles, uint16_t precision)
+uint64_t servo_sleep_duration_us(int32_t waitCycles, uint16_t precision)
 {
     const int64_t cycles = waitCycles >= 0 ? static_cast<int64_t>(waitCycles) : -static_cast<int64_t>(waitCycles);
     return static_cast<uint64_t>(cycles) * static_cast<uint64_t>(precision);
@@ -214,7 +214,7 @@ void test_sleep_command_payload_maps_to_expected_dwell_duration(void)
     TEST_ASSERT_EQUAL_UINT16(1000, gFakeDriver.lastStepRate);
     assert_uint64_equal(
         5000000ULL,
-        servo_dwell_duration_us(gFakeDriver.lastStepNum, gFakeDriver.lastStepRate),
+        servo_sleep_duration_us(gFakeDriver.lastStepNum, gFakeDriver.lastStepRate),
         "sleep payload dwell duration");
 }
 
@@ -334,15 +334,15 @@ void test_sequence_g_sssss_g_queue_duration_totals_2p05_seconds(void)
     const uint64_t gotoOneUs =
         servo_goto_duration_us(0, gFakeDriver.callStepNum[0], gFakeDriver.callStepRate[0]);
     const uint64_t stopOneUs =
-        servo_dwell_duration_us(gFakeDriver.callStepNum[1], gFakeDriver.callStepRate[1]);
+        MotorDriver::planStopDurationUs(gFakeDriver.callStepNum[1], gFakeDriver.callStepRate[1]);
     const uint64_t stopTwoUs =
-        servo_dwell_duration_us(gFakeDriver.callStepNum[2], gFakeDriver.callStepRate[2]);
+        MotorDriver::planStopDurationUs(gFakeDriver.callStepNum[2], gFakeDriver.callStepRate[2]);
     const uint64_t stopThreeUs =
-        servo_dwell_duration_us(gFakeDriver.callStepNum[3], gFakeDriver.callStepRate[3]);
+        MotorDriver::planStopDurationUs(gFakeDriver.callStepNum[3], gFakeDriver.callStepRate[3]);
     const uint64_t stopFourUs =
-        servo_dwell_duration_us(gFakeDriver.callStepNum[4], gFakeDriver.callStepRate[4]);
+        MotorDriver::planStopDurationUs(gFakeDriver.callStepNum[4], gFakeDriver.callStepRate[4]);
     const uint64_t stopFiveUs =
-        servo_dwell_duration_us(gFakeDriver.callStepNum[5], gFakeDriver.callStepRate[5]);
+        MotorDriver::planStopDurationUs(gFakeDriver.callStepNum[5], gFakeDriver.callStepRate[5]);
     const uint64_t gotoTwoUs =
         servo_goto_duration_us(gFakeDriver.callStepNum[0], gFakeDriver.callStepNum[6], gFakeDriver.callStepRate[6]);
     const uint64_t totalUs = gotoOneUs + stopOneUs + stopTwoUs + stopThreeUs + stopFourUs + stopFiveUs + gotoTwoUs;
