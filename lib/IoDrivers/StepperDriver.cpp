@@ -236,11 +236,7 @@ StepperDriver::MotionPlan StepperDriver::planRelativeMove(int32_t currentStep, i
     plan.goalStep = currentStep + deltaStep;
     plan.steps = steps_between(currentStep, plan.goalStep);
     if (plan.steps == 0) return plan;
-    if (stepRate == 0)
-    {
-        plan.durationUs = UINT64_MAX;
-        return plan;
-    }
+    if (stepRate == 0) return plan;
     plan.durationUs = (static_cast<uint64_t>(plan.steps) * 1000000ULL) / static_cast<uint64_t>(stepRate);
     return plan;
 }
@@ -251,11 +247,7 @@ StepperDriver::MotionPlan StepperDriver::planAbsoluteMove(int32_t currentStep, i
     plan.goalStep = targetStep;
     plan.steps = steps_between(currentStep, targetStep);
     if (plan.steps == 0) return plan;
-    if (stepRate == 0)
-    {
-        plan.durationUs = UINT64_MAX;
-        return plan;
-    }
+    if (stepRate == 0) return plan;
     plan.durationUs = (static_cast<uint64_t>(plan.steps) * 1000000ULL) / static_cast<uint64_t>(stepRate);
     return plan;
 }
@@ -292,11 +284,7 @@ StepperDriver::MicrostepMotionPlan StepperDriver::planAbsoluteMoveMicrosteps(
         plan.microstepUnitsPerPulse);
 
     plan.pulseRateHz = rateUnitsPerSecond;
-    if (plan.pulseRateHz == 0)
-    {
-        plan.durationUs = UINT64_MAX;
-        return plan;
-    }
+    if (plan.pulseRateHz == 0) return plan;
     plan.durationUs = (static_cast<uint64_t>(plan.pulses) * 1000000ULL) / static_cast<uint64_t>(plan.pulseRateHz);
     return plan;
 }
@@ -404,6 +392,34 @@ void StepperDriver::scheduleMotionToMicrosteps(uint8_t motorIndex, int64_t targe
 
     motorDwell[motorIndex] = false;
 
+    if (plan.pulses > 0 && rateUnitsPerSecond == 0)
+    {
+        int64_t immediateStartMicrosteps = currentMicrosteps;
+        if (activeRun.motorIndex == static_cast<int8_t>(motorIndex))
+        {
+            applyPulseProgress(motorIndex, PulseEngine::stop());
+            immediateStartMicrosteps = currentPositionMicrosteps[motorIndex];
+            activeRun.motorIndex = -1;
+            activeRun.runSeq = 0;
+            activeRunSeq[motorIndex] = 0;
+        }
+        pendingRun[motorIndex].startPending = false;
+        pendingRun[motorIndex].runSeq = 0;
+        startPositionMicrosteps[motorIndex] = immediateStartMicrosteps;
+        commandTargetMicrosteps[motorIndex] = plan.goalMicrosteps;
+        currentPositionMicrosteps[motorIndex] = plan.goalMicrosteps;
+        if (motorIndex == 0) location = static_cast<int32_t>(plan.goalMicrosteps);
+        commandDeltaTime[motorIndex] = 0;
+        commandDone[motorIndex] = true;
+        ESP_LOGI(
+            TAG,
+            "Motion plan immediate: motor=%u from=%lld to=%lld rate=0",
+            static_cast<unsigned>(motorIndex + 1),
+            static_cast<long long>(immediateStartMicrosteps),
+            static_cast<long long>(plan.goalMicrosteps));
+        return;
+    }
+
     if (plan.pulses > 0)
     {
         startPositionMicrosteps[motorIndex] = currentMicrosteps;
@@ -417,29 +433,15 @@ void StepperDriver::scheduleMotionToMicrosteps(uint8_t motorIndex, int64_t targe
         pendingRun[motorIndex].startPending = true;
         commandDeltaTime[motorIndex] = UINT64_MAX;
         (void)tryStartPendingPulse(motorIndex);
-        if (plan.durationUs == UINT64_MAX)
-        {
-            ESP_LOGI(
-                TAG,
-                "Motion plan goto: motor=%u from=%lld to=%lld steps=%u rate=%u duration=unknown",
-                static_cast<unsigned>(motorIndex + 1),
-                static_cast<long long>(currentMicrosteps),
-                static_cast<long long>(plan.goalMicrosteps),
-                static_cast<unsigned>(plan.pulses),
-                static_cast<unsigned>(rateUnitsPerSecond));
-        }
-        else
-        {
-            ESP_LOGI(
-                TAG,
-                "Motion plan goto: motor=%u from=%lld to=%lld steps=%u rate=%u duration_ms=%llu",
-                static_cast<unsigned>(motorIndex + 1),
-                static_cast<long long>(currentMicrosteps),
-                static_cast<long long>(plan.goalMicrosteps),
-                static_cast<unsigned>(plan.pulses),
-                static_cast<unsigned>(rateUnitsPerSecond),
-                static_cast<unsigned long long>(plan.durationUs / 1000ULL));
-        }
+        ESP_LOGI(
+            TAG,
+            "Motion plan goto: motor=%u from=%lld to=%lld steps=%u rate=%u duration_ms=%llu",
+            static_cast<unsigned>(motorIndex + 1),
+            static_cast<long long>(currentMicrosteps),
+            static_cast<long long>(plan.goalMicrosteps),
+            static_cast<unsigned>(plan.pulses),
+            static_cast<unsigned>(rateUnitsPerSecond),
+            static_cast<unsigned long long>(plan.durationUs / 1000ULL));
     }
     else
     {
@@ -467,6 +469,14 @@ void StepperDriver::motorMove(int32_t deltaUnits, uint16_t rate, uint8_t motorID
     commandSeq[motorIndex].activeCommandSeq = acceptedCommandSeq;
 
     if (shouldRejectForEndstop(MotorOpcode::Move, isEndstopTripped(motorID))) return;
+
+    if (rate == 0 && activeRun.motorIndex == static_cast<int8_t>(motorIndex))
+    {
+        applyPulseProgress(motorIndex, PulseEngine::stop());
+        activeRun.motorIndex = -1;
+        activeRun.runSeq = 0;
+        activeRunSeq[motorIndex] = 0;
+    }
 
     const int64_t deltaMicrosteps = commandUnitsToMicrosteps(deltaUnits, microstepsPerFullStep[motorIndex]);
     const int64_t goalMicrosteps = currentPositionMicrosteps[motorIndex] + deltaMicrosteps;

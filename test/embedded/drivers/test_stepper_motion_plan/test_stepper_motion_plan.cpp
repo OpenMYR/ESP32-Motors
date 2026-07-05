@@ -140,12 +140,12 @@ void test_plan_absolute_move_uses_distance_for_duration(void)
     assert_uint64_equal(1310000ULL, plan.durationUs, "absolute move duration");
 }
 
-void test_plan_move_with_zero_rate_has_unknown_duration(void)
+void test_plan_move_with_zero_rate_has_zero_duration(void)
 {
     const StepperDriver::MotionPlan plan = StepperDriver::planRelativeMove(10, 40, 0);
     TEST_ASSERT_EQUAL_INT32(50, plan.goalStep);
     TEST_ASSERT_EQUAL_UINT32(40, plan.steps);
-    assert_uint64_equal(UINT64_MAX, plan.durationUs, "zero-rate duration sentinel");
+    assert_uint64_equal(0, plan.durationUs, "zero-rate move is immediate");
 }
 
 void test_plan_move_with_zero_steps_has_zero_duration(void)
@@ -322,7 +322,7 @@ extern "C" void app_main(void)
     RUN_TEST(test_microstep_normalization);
     RUN_TEST(test_plan_relative_move_handles_negative_delta);
     RUN_TEST(test_plan_absolute_move_uses_distance_for_duration);
-    RUN_TEST(test_plan_move_with_zero_rate_has_unknown_duration);
+    RUN_TEST(test_plan_move_with_zero_rate_has_zero_duration);
     RUN_TEST(test_plan_move_with_zero_steps_has_zero_duration);
     RUN_TEST(test_plan_relative_move_matches_absolute_path);
     RUN_TEST(test_plan_relative_zero_delta_matches_absolute_path);

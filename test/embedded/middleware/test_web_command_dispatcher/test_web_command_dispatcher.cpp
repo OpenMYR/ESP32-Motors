@@ -158,11 +158,16 @@ void test_processPayload_accepts_stop_and_sleep_with_zero_precision(void)
     TEST_ASSERT_EQUAL_UINT16(0, sleep_op->stepRate);
 }
 
-void test_processPayload_rejects_move_with_zero_rate(void)
+void test_processPayload_accepts_move_with_zero_rate(void)
 {
     const char *payload = R"({"commands":[{"code":"M","data":[2,1,-90,0]}]})";
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, WebCommandDispatcher::processPayload(payload));
-    TEST_ASSERT_TRUE(OpBuffer::getInstance()->isEmpty(2));
+    TEST_ASSERT_EQUAL(ESP_OK, WebCommandDispatcher::processPayload(payload));
+
+    Op *op = next_op(2);
+    TEST_ASSERT_NOT_NULL(op);
+    TEST_ASSERT_EQUAL_CHAR('M', op->opcode);
+    TEST_ASSERT_EQUAL_INT32(-90, op->stepNum);
+    TEST_ASSERT_EQUAL_UINT16(0, op->stepRate);
 }
 
 void test_processPayload_rejects_invalid_code_shape(void)
@@ -175,13 +180,6 @@ void test_processPayload_rejects_invalid_code_shape(void)
 void test_processPayload_rejects_invalid_data_shape(void)
 {
     const char *payload = R"({"commands":[{"code":"M","data":[2,1,-90]}]})";
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, WebCommandDispatcher::processPayload(payload));
-    TEST_ASSERT_TRUE(OpBuffer::getInstance()->isEmpty(2));
-}
-
-void test_processPayload_rejects_motion_opcode_with_zero_step_rate(void)
-{
-    const char *payload = R"({"commands":[{"code":"M","data":[2,1,-90,0]}]})";
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, WebCommandDispatcher::processPayload(payload));
     TEST_ASSERT_TRUE(OpBuffer::getInstance()->isEmpty(2));
 }
@@ -261,10 +259,9 @@ extern "C" void app_main(void)
     RUN_TEST(test_processPayload_queue_zero_kills_then_enqueues_new_command);
     RUN_TEST(test_processPayload_accepts_motor_config_opcodes);
     RUN_TEST(test_processPayload_accepts_stop_and_sleep_with_zero_precision);
-    RUN_TEST(test_processPayload_rejects_move_with_zero_rate);
+    RUN_TEST(test_processPayload_accepts_move_with_zero_rate);
     RUN_TEST(test_processPayload_rejects_invalid_code_shape);
     RUN_TEST(test_processPayload_rejects_invalid_data_shape);
-    RUN_TEST(test_processPayload_rejects_motion_opcode_with_zero_step_rate);
     RUN_TEST(test_processPayload_ignores_unknown_opcode_and_keeps_processing);
     RUN_TEST(test_processPayload_config_C_returns_connect_error_without_followup_calls);
     RUN_TEST(test_processPayload_config_C_returns_credentials_error);

@@ -9,6 +9,8 @@
 
 #define UNITTEST
 
+extern int32_t location;
+
 int motorsControlled = 1;
 bool gDriverStarted = false;
 
@@ -81,6 +83,22 @@ void test_stepper_motorMove() {
     }         
 }
 
+void test_stepper_zero_rate_motion_updates_location_immediately() {
+    StepperDriver *driver = StepperDriver::getInstance();
+
+    driver->abortCommand(1);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    location = 0;
+
+    driver->motorGoTo(10, 0, 1);
+    TEST_ASSERT_EQUAL(false, driver->isMotorRunning(1));
+    TEST_ASSERT_EQUAL_INT32(10 * StepperDriver::kMicrostepUnitsPerFullStep, location);
+
+    driver->motorMove(-2, 0, 1);
+    TEST_ASSERT_EQUAL(false, driver->isMotorRunning(1));
+    TEST_ASSERT_EQUAL_INT32(8 * StepperDriver::kMicrostepUnitsPerFullStep, location);
+}
+
 void test_stepper_motorStop() {
     for (size_t i = 1; i <= motorsControlled; i++)
     {
@@ -135,6 +153,7 @@ extern "C" void app_main(void)
     RUN_TEST(test_endstop_init_cleared);
     RUN_TEST(test_stepper_motorGoTo);
     RUN_TEST(test_stepper_motorMove);
+    RUN_TEST(test_stepper_zero_rate_motion_updates_location_immediately);
     RUN_TEST(test_stepper_motorStop);
     RUN_TEST(test_stepper_motorSleep);
     RUN_TEST(test_stepper_abortCommand);
